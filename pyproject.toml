@@ -1,34 +1,58 @@
 [build-system]
-requires = ["setuptools>=75"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "corporate-site-harness"
 version = "0.1.0"
-description = "Lean corporate and site control plane for Cursor agents"
+description = "Evergreen OSS reference for evidence-gated Cursor corporate/site agent workflows — digest-bound gates and role separation. Not a production enterprise governance product."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "Apache-2.0" }
-authors = [{ name = "Sage Hart" }]
-keywords = ["agents", "cursor", "governance", "verification", "harness"]
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "SafetyMP" }, { name = "Sage Hart" }]
+keywords = [
+  "agents",
+  "agent-governance",
+  "cursor",
+  "evidence",
+  "governance",
+  "multi-agent",
+  "open-source",
+  "reference-architecture",
+  "verification",
+  "harness",
+]
 classifiers = [
   "Development Status :: 3 - Alpha",
-  "License :: OSI Approved :: Apache Software License",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3 :: Only",
   "Topic :: Software Development :: Quality Assurance",
 ]
 dependencies = [
   "PyYAML>=6,<7",
 ]
 
+[project.urls]
+Homepage = "https://github.com/SafetyMP/corporate-site-harness"
+Repository = "https://github.com/SafetyMP/corporate-site-harness"
+Issues = "https://github.com/SafetyMP/corporate-site-harness/issues"
+Changelog = "https://github.com/SafetyMP/corporate-site-harness/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/SafetyMP/corporate-site-harness/blob/main/docs/HOW_IT_WORKS.md"
+
 [project.scripts]
 corp-harness = "corp_harness.cli:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.4"]
+dev = ["pytest>=8", "ruff>=0.4", "build>=1.2", "twine>=5"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

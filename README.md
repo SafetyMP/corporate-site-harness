@@ -1,11 +1,19 @@
 # Corporate/Site Harness
 
-Evidence-gated control plane for Cursor agents: **corporate** roles design and
-review in one workspace; **site** roles implement in an isolated repository;
-executable digests—not prose—decide whether work advances.
+> Evergreen OSS reference for **evidence-gated Cursor agent workflows** — corporate
+> roles design and review; site roles implement in an isolated repository;
+> digest-bound gates decide whether work advances. Part of the
+> [SafetyMP](https://github.com/SafetyMP) open-source portfolio.
 
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![CI](https://github.com/SafetyMP/corporate-site-harness/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/SafetyMP/corporate-site-harness/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/SafetyMP/corporate-site-harness/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/SafetyMP/corporate-site-harness/actions/workflows/codeql.yml)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/SafetyMP/corporate-site-harness/badge)](https://scorecard.dev/viewer/?uri=github.com/SafetyMP/corporate-site-harness)
+[![License: Apache-2.0](https://img.shields.io/github/license/SafetyMP/corporate-site-harness)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](pyproject.toml)
+[![Code of Conduct](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](CODE_OF_CONDUCT.md)
+
+> **Scope:** Reference architecture and runnable factory control plane — **not** a
+> production-hardened enterprise governance product. See [SECURITY.md](SECURITY.md).
 
 > **How it works:** see [docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md) for the full
 > phase machine, corporate↔site handoff, and every agent stakeholder.
@@ -131,6 +139,17 @@ Created by local runs; **not** part of the published tree:
 - `archives/` — archived payloads
 - `.corp-harness-program-root` — pointer to an active corporate root
 
+## Community
+
+| Resource | Purpose |
+|----------|---------|
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Setup, DCO sign-off, PR expectations |
+| [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | Contributor Covenant 2.1 |
+| [SECURITY.md](SECURITY.md) | Private vulnerability reporting |
+| [SUPPORT.md](SUPPORT.md) | How to get help |
+| [GOVERNANCE.md](GOVERNANCE.md) | Maintainer model and decisions |
+| [CHANGELOG.md](CHANGELOG.md) | Release notes |
+
 ## License
 
-Apache License 2.0. See [LICENSE](LICENSE).
+Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

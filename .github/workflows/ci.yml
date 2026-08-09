@@ -5,10 +5,18 @@ on:
     branches: [main, master]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
     steps:
@@ -17,9 +25,12 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
       - name: Install
         run: pip install -e ".[dev]"
       - name: Ruff
         run: python -m ruff check src tests
       - name: Pytest
         run: python -m pytest -q
+      - name: Package metadata
+        run: python -m pip install build twine && python -m build && twine check dist/*
