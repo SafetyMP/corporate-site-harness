@@ -17,7 +17,8 @@ Agents propose. Digests decide. Humans approve.
 > **Scope:** Reference architecture and runnable factory control plane — **not** a
 > production-hardened enterprise governance product. See [SECURITY.md](SECURITY.md).
 
-**Jump to:** [At a glance](#at-a-glance) · [Install](#install) · [Flow](#project-flow-summary) ·
+**Jump to:** [At a glance](#at-a-glance) · [vs LangGraph / AutoCrew](#why-not-langgraph-or-autocrew) ·
+[Install](#install) · [Flow](#project-flow-summary) ·
 [Quickstart](#quickstart-product-program) · [How it works](docs/HOW_IT_WORKS.md) ·
 [Contributing](CONTRIBUTING.md)
 
@@ -30,6 +31,27 @@ Agents propose. Digests decide. Humans approve.
 | One chat designs, codes, and declares success | **Corporate** designs; **site** implements; **ops** verifies |
 | “Looks good” prose passes reviews | Gate PASS requires **current artifact digests** |
 | Agents can self-approve | Only the **user** records final approval |
+
+### Why not LangGraph or AutoCrew?
+
+Stacks like **LangGraph**, **CrewAI / AutoCrew-style** crews, and similar
+multi-agent runtimes orchestrate LLM workers **inside one application process**:
+graphs, tools, memory, and message-passing between roles. That is valuable for
+*building* agent products.
+
+This harness solves a different problem: **governed software delivery in Cursor**.
+
+| | LangGraph / AutoCrew-style runtimes | This harness |
+|--|-------------------------------------|--------------|
+| **Job** | Run multi-agent *applications* | Gate multi-agent *engineering work* |
+| **Where state lives** | Runtime graph / crew memory | Sibling git workspaces + `program.json` |
+| **Progress signal** | Model/tool outcomes in-process | Executable verify/adversarial scripts + digests |
+| **Authority** | Prompt/policy inside the app | CLI-enforced phases; agents never `--actor user` |
+| **Split** | Roles share one runtime | Corporate design vs site implementation (isolated roots) |
+
+Use LangGraph or AutoCrew-style crews to *build* agent systems. Use this harness
+when Cursor agents must **design, hand off, implement, falsify, and wait for a
+human** without collapsing into one self-approving chat.
 
 ```mermaid
 flowchart TB
