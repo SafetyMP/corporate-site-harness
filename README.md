@@ -1,9 +1,11 @@
 # Corporate/Site Harness
 
-> Evergreen OSS reference for **evidence-gated Cursor agent workflows** — corporate
-> roles design and review; site roles implement in an isolated repository;
-> digest-bound gates decide whether work advances. Part of the
-> [SafetyMP](https://github.com/SafetyMP) open-source portfolio.
+**Evergreen open-source reference** for evidence-gated **Cursor agent delivery** —
+corporate agents design and review; site agents implement in an isolated repo;
+`corp-harness` advances work only on **digest-bound evidence**. Part of the
+[SafetyMP](https://github.com/SafetyMP) portfolio.
+
+Agents propose. Digests decide. Humans approve.
 
 [![CI](https://github.com/SafetyMP/corporate-site-harness/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/SafetyMP/corporate-site-harness/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/SafetyMP/corporate-site-harness/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/SafetyMP/corporate-site-harness/actions/workflows/codeql.yml)
@@ -15,18 +17,77 @@
 > **Scope:** Reference architecture and runnable factory control plane — **not** a
 > production-hardened enterprise governance product. See [SECURITY.md](SECURITY.md).
 
-> **How it works:** see [docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md) for the full
-> phase machine, corporate↔site handoff, and every agent stakeholder.
+**Jump to:** [At a glance](#at-a-glance) · [Install](#install) · [Flow](#project-flow-summary) ·
+[Quickstart](#quickstart-product-program) · [How it works](docs/HOW_IT_WORKS.md) ·
+[Contributing](CONTRIBUTING.md)
 
-## Why this exists
+---
 
-Multi-agent coding often collapses into one chat that both writes code and
-declares success. This harness separates authority:
+## At a glance
 
-- Specs and gates live in a **corporate root** (`program.json`).
-- Implementation lives in a **site** checkout.
-- `corp-harness` records digest-bound evidence; agents never invent a PASS.
-- Only the **user** grants `factory_authorization` and final `user_approval`.
+| Without the harness | With this harness |
+|---------------------|-------------------|
+| One chat designs, codes, and declares success | **Corporate** designs; **site** implements; **ops** verifies |
+| “Looks good” prose passes reviews | Gate PASS requires **current artifact digests** |
+| Agents can self-approve | Only the **user** records final approval |
+
+```mermaid
+flowchart TB
+  subgraph factory [Factory - this repo]
+    CLI["corp-harness CLI"]
+    Plugin["Cursor plugin roles"]
+  end
+
+  subgraph corporate [Corporate root]
+    Program["program.json"]
+    Spec["master-spec + acceptance"]
+    Gates["digest-bound gates"]
+  end
+
+  subgraph site [Site root]
+    Code["product implementation"]
+    ADRs["ADRs + work packets"]
+    Scripts["scripts/harness verify + adversarial"]
+  end
+
+  User["User approval"]
+
+  Plugin --> CLI
+  CLI --> Program
+  Spec --> Gates
+  Gates -->|"handoff digests"| ADRs
+  ADRs --> Code
+  Scripts -->|"evidence"| Gates
+  Gates --> User
+```
+
+Three workspaces stay **siblings** — never nested:
+
+```text
+~/work/
+├── corporate-site-harness/   ← factory (CLI + plugin)
+├── my-app-corporate/         ← program.json + gates + dossier
+└── my-app/                   ← product code + site harness scripts
+```
+
+```mermaid
+flowchart LR
+  D[DESIGN] --> CA[CORPORATE_ACCEPTANCE]
+  CA --> SD[SITE_DELIVERY]
+  SD --> SV[SITE_VERIFICATION]
+  SV --> CR[CORPORATE_REVIEW]
+  CR --> ADV[ADVERSARY]
+  ADV --> WAIT[AWAITING_USER_APPROVAL]
+  WAIT --> DONE[APPROVED]
+```
+
+| Lane | Who | Job |
+|------|-----|-----|
+| Corporate | CEO · specialists · COO · adversary | Spec, handoff, review, falsify |
+| Site | manager · specialist · operations | ADR packets, implement, verify |
+| Human | **user only** | `factory_authorization` · final `user_approval` |
+
+Full stakeholder map and phase contracts: [docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md).
 
 ## Install
 
@@ -55,26 +116,12 @@ Slash commands: `/project-intake`, `/corp-status`, `/site-deliver`,
 
 ## Project flow (summary)
 
-```text
-DESIGN → CORPORATE_ACCEPTANCE → SITE_DELIVERY → SITE_VERIFICATION
-      → CORPORATE_REVIEW → ADVERSARY → AWAITING_USER_APPROVAL → APPROVED
-```
-
 | Stage | Where | Who |
 |-------|-------|-----|
 | Design & corporate acceptance | Corporate root | CEO, specialists, COO |
 | Delivery & site verification | Site root | Site manager, site specialist, operations excellence |
 | Review, adversary, dossier | Corporate root | Specialists, adversary, CEO |
 | Final approval | Corporate root | **User only** |
-
-Workspaces stay separate:
-
-```text
-~/work/
-  corporate-site-harness/   ← factory (this repo)
-  my-app-corporate/         ← program.json + gates
-  my-app/                   ← product implementation
-```
 
 Never nest the corporate root under the site. Never write `program.json` into
 the site. Product sites must not edit `src/corp_harness/**`.
