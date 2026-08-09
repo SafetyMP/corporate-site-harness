@@ -1,0 +1,12 @@
+{
+  "fixtures": {
+    "check_authorized_surfaces_signals.json": "0d56acb60e6280bc00c48e7035954c23d3864cbc3235668bd488af0548e34ad9",
+    "check_handoff_signals.json": "2ae7f12c391e9a46533e0c5fb93128ad7b962b83d24aab7edb865e27c4554c30",
+    "corp-gov-check-stub": "cf6869a7717bc2a7c0777cad693f0a86762a3990df12c172fdecb5cdcce88673",
+    "explain_stale_signals.json": "21aaaefe718ebb184038bf3fbb20fb3e957346133e8d963a95644103a298ebc4",
+    "scaffold_approval_draft.json": "8be0fa5332cc725f04ae745fefbb1a115b8672a74167066da015182456ce65a7",
+    "scaffold_factory_auth_draft.json": "f7ba380ec7caff5f301975ff1f51793df2f428c9a78307dc4ea68c07e51352ec",
+    "stage2_review_only_ca_signals.json": "772411c41f64173b8be610c353605c927a0ab62399e3523bd0dfe035e2be38e5"
+  },
+  "schema": "corporate-site-gov-fixture-manifest/v1"
+}

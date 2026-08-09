@@ -1,0 +1,7 @@
+{
+  "currentness_mode": "dual_evidence_required",
+  "review_only_pass_not_current": true,
+  "corporate_acceptance_current": false,
+  "implies_current_corporate_acceptance_pass": false,
+  "scaffold_must_not_imply_current_ca_pass": true
+}

@@ -1,0 +1,9 @@
+{
+  "schema": "corporate-site-trust-event/v1",
+  "kind": "deceptive_theater",
+  "theater_signal_id": "unbound_kpi",
+  "reasons": [
+    "fixture:unbound_kpi"
+  ],
+  "emitter": "python_runtime_engine"
+}

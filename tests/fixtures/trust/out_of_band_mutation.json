@@ -1,0 +1,9 @@
+{
+  "schema": "corporate-site-trust-event/v1",
+  "kind": "deceptive_theater",
+  "theater_signal_id": "out_of_band_mutation",
+  "reasons": [
+    "fixture:out_of_band_mutation"
+  ],
+  "emitter": "python_runtime_engine"
+}

@@ -1,0 +1,10 @@
+---
+description: Restrict premium models to escalated hard implementation
+alwaysApply: true
+---
+
+# Premium models
+
+Sol/Fable only via `hard_implement` (or escalated packet/remediate). Never for
+recapture, dispatch, or review. Run `corp-harness route-model` before Task
+launch; attest `model_id`/`model_class`/`task_class` on packets.

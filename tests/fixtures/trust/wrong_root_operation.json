@@ -1,0 +1,9 @@
+{
+  "schema": "corporate-site-trust-event/v1",
+  "kind": "deceptive_theater",
+  "theater_signal_id": "wrong_root_operation",
+  "reasons": [
+    "fixture:wrong_root_operation"
+  ],
+  "emitter": "python_runtime_engine"
+}

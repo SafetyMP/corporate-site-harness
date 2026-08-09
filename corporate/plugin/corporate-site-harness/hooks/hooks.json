@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "type": "command",
+        "command": "python3 \"${CURSOR_PLUGIN_ROOT}/hooks/premium_policy_reminder.py\" --event sessionStart"
+      }
+    ],
+    "preToolUse": [
+      {
+        "type": "command",
+        "command": "python3 \"${CURSOR_PLUGIN_ROOT}/hooks/premium_policy_reminder.py\" --event preToolUse",
+        "matcher": "Task|Subagent|TaskAgent"
+      }
+    ]
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "schema": "corporate-site-trust-event/v1",
+  "kind": "deceptive_theater",
+  "theater_signal_id": "stale_factory_authorization",
+  "reasons": [
+    "fixture:stale_factory_authorization"
+  ],
+  "emitter": "python_runtime_engine"
+}

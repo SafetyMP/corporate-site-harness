@@ -1,0 +1,9 @@
+{
+  "command": "check-handoff",
+  "present": true,
+  "implies_current_corporate_acceptance_pass": false,
+  "corporate_acceptance_current": false,
+  "review_only_pass_not_current": true,
+  "stage2_notes_required": true,
+  "file_current_for_empty_handoff_body": true
+}

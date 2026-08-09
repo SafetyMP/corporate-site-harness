@@ -1,0 +1,8 @@
+{
+  "schema": "corporate-site-factory-authorization/v1",
+  "draft": true,
+  "authorized": false,
+  "granted_by": "pending-user",
+  "granted_at": "",
+  "implies_current_corporate_acceptance_pass": false
+}

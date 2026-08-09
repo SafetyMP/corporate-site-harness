@@ -1,0 +1,8 @@
+{
+  "schema": "corporate-site-user-approval/v1",
+  "draft": true,
+  "approved": false,
+  "granted_by": "pending-user",
+  "granted_at": "",
+  "implies_current_corporate_acceptance_pass": false
+}

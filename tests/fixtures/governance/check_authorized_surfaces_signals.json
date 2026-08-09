@@ -1,0 +1,9 @@
+{
+  "command": "check-authorized-surfaces",
+  "allow_path": "src/corp_harness/swift_gov.py",
+  "deny_path": "src/corp_harness/model.py",
+  "implies_current_corporate_acceptance_pass": false,
+  "tree_unchanged": true,
+  "grants_authorization": false,
+  "mutation": false
+}

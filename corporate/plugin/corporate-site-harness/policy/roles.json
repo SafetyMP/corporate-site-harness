@@ -1,0 +1,55 @@
+{
+  "schema": "corporate-site-roles/v2",
+  "roles": {
+    "corporate-adversary": {
+      "readonly": true,
+      "model_class": "standard",
+      "premium_allowed": false
+    },
+    "corporate-ceo": {
+      "readonly": true,
+      "model_class": "standard",
+      "premium_allowed": false
+    },
+    "corporate-coo": {
+      "readonly": true,
+      "model_class": "standard",
+      "premium_allowed": false
+    },
+    "corporate-specialist": {
+      "readonly": true,
+      "model_class": "standard",
+      "premium_allowed": false
+    },
+    "operations-excellence": {
+      "readonly": true,
+      "model_class": "fast",
+      "premium_allowed": false
+    },
+    "site-manager": {
+      "readonly": true,
+      "model_class": "fast",
+      "premium_allowed": false
+    },
+    "site-specialist": {
+      "readonly": false,
+      "model_class": "standard",
+      "premium_allowed": true,
+      "premium_task_classes": ["hard_implement", "packet_implement", "remediate"]
+    }
+  },
+  "task_classes": {
+    "design_review": {"default_model_class": "fast", "premium_allowed": false},
+    "explore": {"default_model_class": "fast", "premium_allowed": false},
+    "evidence_recapture": {"default_model_class": "fast", "premium_allowed": false},
+    "dispatch_attest": {"default_model_class": "fast", "premium_allowed": false},
+    "independent_review": {"default_model_class": "fast", "premium_allowed": false},
+    "packet_implement": {"default_model_class": "standard", "premium_allowed": "escalation"},
+    "hard_implement": {"default_model_class": "premium", "premium_allowed": "escalation"},
+    "remediate": {"default_model_class": "standard", "premium_allowed": "after_two_standard_failures"}
+  },
+  "preferred_families": {
+    "fast": ["grok", "composer"],
+    "standard": ["composer", "grok"]
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "schema": "corporate-site-trust-event/v1",
+  "kind": "deceptive_theater",
+  "theater_signal_id": "seal_bypass_attempt",
+  "reasons": [
+    "fixture:seal_bypass_attempt"
+  ],
+  "emitter": "python_runtime_engine"
+}

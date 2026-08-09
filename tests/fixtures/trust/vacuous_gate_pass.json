@@ -1,0 +1,9 @@
+{
+  "schema": "corporate-site-trust-event/v1",
+  "kind": "deceptive_theater",
+  "theater_signal_id": "vacuous_gate_pass",
+  "reasons": [
+    "fixture:vacuous_gate_pass"
+  ],
+  "emitter": "python_runtime_engine"
+}

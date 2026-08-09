@@ -1,0 +1,9 @@
+{
+  "command": "explain-stale",
+  "has_stale": true,
+  "implies_current_corporate_acceptance_pass": false,
+  "corporate_acceptance_current": false,
+  "review_only_pass_not_current": true,
+  "expects_gate_item": "corporate_acceptance",
+  "cascade_mentions_stage2": true
+}

@@ -1,0 +1,9 @@
+{
+  "schema": "corporate-site-trust-event/v1",
+  "kind": "deceptive_theater",
+  "theater_signal_id": "unauthorized_actor",
+  "reasons": [
+    "fixture:unauthorized_actor"
+  ],
+  "emitter": "python_runtime_engine"
+}

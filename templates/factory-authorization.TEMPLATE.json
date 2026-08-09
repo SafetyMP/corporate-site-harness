@@ -1,0 +1,19 @@
+{
+  "schema": "corporate-site-factory-authorization/v1",
+  "authorized": true,
+  "granted_by": "user",
+  "program_id": "REPLACE_WITH_PROGRAM_ID",
+  "revision": 1,
+  "master_spec_sha256": "REPLACE_WITH_MASTER_SPEC_SHA256",
+  "factory_root": "/path/to/Cursor Harness",
+  "authorized_surfaces": [
+    "src/corp_harness",
+    "tests",
+    "pyproject.toml",
+    "corporate/plugin/corporate-site-harness",
+    "AGENTS.md",
+    "docs/adr",
+    "scripts/harness"
+  ],
+  "granted_at": "REPLACE_WITH_UTC_ISO8601"
+}
