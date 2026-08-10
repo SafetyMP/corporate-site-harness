@@ -1,0 +1,132 @@
+name: Harness LLM dataset
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "datasets/harness-llm/**"
+      - ".github/workflows/harness-llm-dataset.yml"
+  pull_request:
+    paths:
+      - "datasets/harness-llm/**"
+      - ".github/workflows/harness-llm-dataset.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: harness-llm-dataset-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dataset-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install export deps
+        run: pip install pyarrow
+      - name: Validate dataset
+        run: python3 datasets/harness-llm/scripts/validate_dataset.py
+      - name: Gold self-score (must be 100%)
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path("datasets/harness-llm/eval")
+          out = Path("/tmp/gold_preds.jsonl")
+          n = 0
+          with out.open("w", encoding="utf-8") as fh:
+              for path in sorted(root.glob("*.jsonl")):
+                  for line in path.read_text(encoding="utf-8").splitlines():
+                      if not line.strip():
+                          continue
+                      row = json.loads(line)
+                      assistant = ""
+                      for m in reversed(row["messages"]):
+                          if m["role"] == "assistant":
+                              assistant = m["content"]
+                              break
+                      fh.write(json.dumps({"id": row["id"], "assistant": assistant}) + "\n")
+                      n += 1
+          print(f"wrote {n} gold predictions to {out}")
+          PY
+          python3 datasets/harness-llm/scripts/score_eval.py \
+            --predictions /tmp/gold_preds.jsonl \
+            --out /tmp/harness-llm-gold-score.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path("/tmp/harness-llm-gold-score.json").read_text())
+          passed, total = report["passed"], report["total"]
+          print(json.dumps({"passed": passed, "total": total, "accuracy": report["accuracy"]}, indent=2))
+          if total != 450 or passed != 450:
+              raise SystemExit(f"gold self-score failed: expected 450/450, got {passed}/{total}")
+          PY
+      - name: Export Hugging Face package smoke
+        run: |
+          python3 datasets/harness-llm/scripts/export_huggingface.py
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          hf = Path("datasets/harness-llm/huggingface")
+          meta = json.loads((hf / "export_meta.json").read_text())
+          required = [
+              "data/train.jsonl",
+              "data/validation.jsonl",
+              "data/train.parquet",
+              "data/validation.parquet",
+              "data/messages_only_train.jsonl",
+              "data/messages_only_validation.jsonl",
+              "data/messages_only_train.parquet",
+              "data/messages_only_validation.parquet",
+              "data/dpo_train.jsonl",
+              "data/dpo_validation.jsonl",
+              "data/dpo_train.parquet",
+              "data/dpo_validation.parquet",
+              "README.md",
+              "export_meta.json",
+          ]
+          missing = [p for p in required if not (hf / p).exists()]
+          if missing:
+              raise SystemExit(f"missing export files: {missing}")
+          def nlines(p):
+              return sum(1 for line in (hf / p).read_text().splitlines() if line.strip())
+          train_n = nlines("data/train.jsonl")
+          val_n = nlines("data/validation.jsonl")
+          if train_n != meta["train_rows"] or val_n != meta["validation_rows"]:
+              raise SystemExit(
+                  f"row count mismatch meta={meta['train_rows']}/{meta['validation_rows']} "
+                  f"files={train_n}/{val_n}"
+              )
+          if meta.get("schema") != "v0.3-lora-standard":
+              raise SystemExit(f"unexpected schema: {meta.get('schema')}")
+          dpo_train = nlines("data/dpo_train.jsonl")
+          dpo_val = nlines("data/dpo_validation.jsonl")
+          if dpo_train != meta["dpo_train_rows"] or dpo_val != meta["dpo_validation_rows"]:
+              raise SystemExit("dpo row count mismatch")
+          if dpo_train < 1 or dpo_val < 1:
+              raise SystemExit("dpo splits must be non-empty")
+          card = (hf / "README.md").read_text()
+          for needle in (
+              "Training Recipe",
+              "Qwen/Qwen2.5-7B-Instruct",
+              "Evaluation Protocol",
+              "config_name: dpo",
+              "v0.3-lora-standard",
+          ):
+              if needle not in card:
+                  raise SystemExit(f"dataset card missing: {needle}")
+          print(json.dumps({
+              "ok": True,
+              "schema": meta["schema"],
+              "train_rows": meta["train_rows"],
+              "validation_rows": meta["validation_rows"],
+              "dpo_train_rows": meta["dpo_train_rows"],
+              "dpo_validation_rows": meta["dpo_validation_rows"],
+          }, indent=2))
+          PY

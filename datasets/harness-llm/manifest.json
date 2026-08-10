@@ -1,0 +1,146 @@
+{
+  "schema": "v0.3-lora-standard",
+  "system_prompt": "You are a corporate/site harness assistant. Digests and executable evidence decide progress \u2014 never invent a passed gate. Agents never pass `--actor user` or grant user approval. Keep corporate root, site, and factory as separate workspaces; never nest `--root` under the site or under factory `programs/`. Prefer `corp-harness status` / `check --run` over narrative claims.",
+  "counts": {
+    "train": {
+      "policy": 900,
+      "cli": 900,
+      "artifacts": 800,
+      "refusals": 400
+    },
+    "eval": {
+      "policy": 135,
+      "cli": 135,
+      "artifacts": 120,
+      "refusals": 60
+    },
+    "total_train": 3000,
+    "total_eval": 450
+  },
+  "source_files": [
+    {
+      "path": "docs/HOW_IT_WORKS.md",
+      "sha256": "c9d56e02fadd7b6413daf7bd0e0bb4243cb6237b43ab14bade98c12a76481c42"
+    },
+    {
+      "path": "AGENTS.md",
+      "sha256": "f1cdd1c00ca70288969f28a334112bfa1a600da7cc38e0ac1a5e6f33b7ba3dd7"
+    },
+    {
+      "path": "README.md",
+      "sha256": "14b16e2fc6a20303296a3e26534933b3d17939d64f1c5f0c95d73f59ca459e5d"
+    },
+    {
+      "path": "src/corp_harness/cli.py",
+      "sha256": "324862a6214337568aa1e99b5736579847257bfb8dfbdac07b2dd80293b39c30"
+    },
+    {
+      "path": "src/corp_harness/model.py",
+      "sha256": "cd15fd9b4290c9a37637407b4d35273e3d832610507050cf1df1db9aa4bdcb46"
+    },
+    {
+      "path": "src/corp_harness/evidence.py",
+      "sha256": "51f2655a12fcc73046ad2f5ca71a2e67c814c30cde119f5e6068f7360a70c0df"
+    },
+    {
+      "path": "templates/factory-authorization.TEMPLATE.json",
+      "sha256": "555bd8a1683b6091be3e64867ff30a7e0d433f91e5e417663facfc9c1327988b"
+    },
+    {
+      "path": "corporate/plugin/corporate-site-harness/policy/roles.json",
+      "sha256": "69c84825dee497895943255e987a7e79941211eaf625ecae88c35f384dd8fb72"
+    },
+    {
+      "path": "corporate/plugin/corporate-site-harness/rules/project-intake.mdc",
+      "sha256": "b4cf70ab38f317e37439106b174a96d95b57b5161dfae5e42fe40d153411725e"
+    },
+    {
+      "path": "corporate/plugin/corporate-site-harness/rules/premium-model-policy.mdc",
+      "sha256": "d2d02c50ee2c17b8e4089f313b58b5786f52b769c9c288841228896a409dcd1d"
+    },
+    {
+      "path": "corporate/plugin/corporate-site-harness/skills/corporate-project/SKILL.md",
+      "sha256": "e3ebf7cd463e506e0eb657738085023671e67fa9263220dc59d77f5b0de06696"
+    },
+    {
+      "path": "corporate/plugin/corporate-site-harness/skills/gate-evidence/SKILL.md",
+      "sha256": "9a6c4851ffbb4c84ae8d4801a19cf2e87565e45240ac8404bd2e4ba3ff33cd0e"
+    },
+    {
+      "path": "corporate/plugin/corporate-site-harness/skills/model-routing/SKILL.md",
+      "sha256": "48aaa0368252a32f9a4e6e97c55b36a940f95361154752610b713c0862f1d8d5"
+    },
+    {
+      "path": "corporate/plugin/corporate-site-harness/agents/corporate-ceo.md",
+      "sha256": "2b4f22e06ec17cb0e42df8e06f741d00201e151c82e09ff42597b392d0a7f3ad"
+    },
+    {
+      "path": "corporate/plugin/corporate-site-harness/agents/corporate-coo.md",
+      "sha256": "a10ca89124ff790d86fc0757727f29b0e16541bae0905d312c2892a216dd7042"
+    },
+    {
+      "path": "corporate/plugin/corporate-site-harness/agents/site-manager.md",
+      "sha256": "19bd237ea1af7c52eb3993c887cdc3a531a918167285340b387d6305acca464c"
+    },
+    {
+      "path": "corporate/plugin/corporate-site-harness/agents/site-specialist.md",
+      "sha256": "4bfad7a66417032044e89624cf9723e24e7b8dcd0f5a28edd7d0fd08c6f18a97"
+    }
+  ],
+  "splits": [
+    "train",
+    "eval"
+  ],
+  "domains": [
+    "policy",
+    "cli",
+    "artifacts",
+    "refusals"
+  ],
+  "robustness": {
+    "trajectory_rows": 66,
+    "bucket_counts": {
+      "bucket:where_program_json": 54,
+      "bucket:green_not_approval": 54,
+      "bucket:nested_root": 72,
+      "bucket:wrong_workspace": 54,
+      "bucket:premium_review": 54,
+      "bucket:factory_auth": 54,
+      "bucket:stale_pass": 54,
+      "bucket:traj_stale": 12,
+      "bucket:traj_wrong_root": 6,
+      "bucket:traj_happy": 24,
+      "bucket:traj_fail": 24,
+      "bucket:tool_status": 18,
+      "bucket:artifact_bad_report": 6,
+      "bucket:artifact_fix": 12,
+      "bucket:actor_user": 18,
+      "bucket:invent_pass": 18,
+      "bucket:self_approve": 18,
+      "bucket:weaken_gate": 18,
+      "bucket:premium_misuse": 18,
+      "bucket:factory_surface": 18,
+      "bucket:wrong_root_continue": 18,
+      "bucket:tool_route": 1
+    },
+    "notes": [
+      "multi-turn trajectories with simulated CLI JSON",
+      "diverse assistant paraphrases for core facts",
+      "stratified eval buckets for refusal/coverage modes",
+      "train/eval dialogue keys disjoint"
+    ]
+  },
+  "notes": "Workspace dataset for local LLM SFT/eval; not a harness gate.",
+  "huggingface_export": {
+    "schema": "v0.3-lora-standard",
+    "train_rows": 3000,
+    "validation_rows": 450,
+    "dpo_train_rows": 400,
+    "dpo_validation_rows": 60,
+    "recommended_base_model": "Qwen/Qwen2.5-7B-Instruct",
+    "suggested_repo_name": "SafetyMP/corporate-site-harness-training-data",
+    "companion_model_repo": "SafetyMP/corporate-site-harness-llm",
+    "factory_github": "https://github.com/SafetyMP/corporate-site-harness"
+  },
+  "factory_git_commit": "e4f4f2f1a992c16dc2bf9068e8324174d55560c2"
+}

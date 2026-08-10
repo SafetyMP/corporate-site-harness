@@ -8,7 +8,9 @@ __pycache__/
 .coverage
 htmlcov/
 .venv/
+.venv-*/
 venv/
+datasets/harness-llm/.venv-eval/
 dist/
 build/
 wheels/
