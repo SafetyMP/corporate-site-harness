@@ -1,0 +1,14 @@
+{
+  "schema": "harness-llm-unsloth-export/v1",
+  "train_rows": 3000,
+  "eval_rows": 450,
+  "files": [
+    "train.jsonl",
+    "eval.jsonl",
+    "train_messages.jsonl",
+    "eval_messages.jsonl"
+  ],
+  "load": {
+    "huggingface_datasets": "load_dataset(\"json\", data_files={\"train\": \"datasets/harness-llm/unsloth/train_messages.jsonl\", \"eval\": \"datasets/harness-llm/unsloth/eval_messages.jsonl\"})"
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "card_schema": "harness-llm-model-card/v1",
+  "repo_id": "SafetyMP/corporate-site-harness-llm",
+  "base_model": "unsloth/Qwen2.5-7B-Instruct",
+  "base_model_relation": "finetune",
+  "weight_format": "merged_safetensors",
+  "adapter_in_repo": false,
+  "training_method": "unsloth_qlora_then_merge",
+  "dataset_id": "SafetyMP/corporate-site-harness-training-data",
+  "dataset_revision": "v0.3-lora-standard",
+  "factory_github": "https://github.com/SafetyMP/corporate-site-harness",
+  "naming": {
+    "github_factory": "SafetyMP/corporate-site-harness",
+    "hf_dataset": "SafetyMP/corporate-site-harness-training-data",
+    "hf_model": "SafetyMP/corporate-site-harness-llm"
+  },
+  "frameworks": {
+    "transformers": true,
+    "unsloth": true,
+    "mlx_export_tag_legacy": true
+  },
+  "endorsed_recipe": {
+    "path": "datasets/harness-llm/recipes/train_qlora_qwen25_7b.py",
+    "lora_r": 16,
+    "lora_alpha": 16,
+    "max_seq_length": 4096,
+    "train_on_responses_only": true
+  },
+  "training_run": {
+    "epochs": 3,
+    "hardware": {
+      "machine": "Apple MacBook Pro",
+      "chip": "M5 Max",
+      "memory_gb": 128
+    }
+  },
+  "reported_trainer_snapshot": {
+    "loss": 0.9269,
+    "learning_rate": 6.67e-5,
+    "grad_norm": 0.695,
+    "note": "trainer log snapshot; not a formal benchmark"
+  },
+  "generation_defaults": {
+    "temperature": 0.3,
+    "top_p": 0.9,
+    "top_k": 20,
+    "repetition_penalty": 1.05
+  },
+  "evaluation": {
+    "hub_by_domain_scores_published": false,
+    "scorer": "datasets/harness-llm/scripts/score_eval.py"
+  },
+  "privacy": "synthetic workspace-neutral paths; no real user transcripts or live secrets claimed"
+}

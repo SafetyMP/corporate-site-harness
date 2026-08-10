@@ -1,0 +1,32 @@
+{
+  "schema": "v0.3-lora-standard",
+  "train_rows": 3000,
+  "validation_rows": 450,
+  "dpo_train_rows": 400,
+  "dpo_validation_rows": 60,
+  "data_files": [
+    "data/train.jsonl",
+    "data/validation.jsonl",
+    "data/train.parquet",
+    "data/validation.parquet",
+    "data/messages_only_train.jsonl",
+    "data/messages_only_validation.jsonl",
+    "data/messages_only_train.parquet",
+    "data/messages_only_validation.parquet",
+    "data/dpo_train.jsonl",
+    "data/dpo_validation.jsonl",
+    "data/dpo_train.parquet",
+    "data/dpo_validation.parquet"
+  ],
+  "suggested_repo_name": "SafetyMP/corporate-site-harness-training-data",
+  "companion_model_repo": "SafetyMP/corporate-site-harness-llm",
+  "factory_github": "https://github.com/SafetyMP/corporate-site-harness",
+  "naming": {
+    "github_factory": "SafetyMP/corporate-site-harness",
+    "hf_dataset": "SafetyMP/corporate-site-harness-training-data",
+    "hf_model": "SafetyMP/corporate-site-harness-llm"
+  },
+  "recommended_base_model": "Qwen/Qwen2.5-7B-Instruct",
+  "factory_git_commit": "e4f4f2f1a992c16dc2bf9068e8324174d55560c2",
+  "privacy": "synthetic paths only; no personal identifying information"
+}
