@@ -20,6 +20,13 @@ REQUIRED_LOG_TESTS=(
   test_TR_LOG_006b_trust_log_cli_readonly
 )
 
+REQUIRED_FC_TESTS=(
+  test_FC_RECOVER_001_agent_actor_refused
+  test_FC_RECOVER_001_user_apply_allows_record
+  test_FC_LOG_001_concurrent_append_unique_seq
+  test_FC_SCAN_001_pyc_build_not_oob_without_fa
+)
+
 # ADR-TR-003 / G-TR-AH-CORE + G-TR-AH-BYPASS (WP-TR-AH-C).
 REQUIRED_AH_TESTS=(
   test_TR_AH_001_d5_seven_theater_fixtures_and_rejection
@@ -141,7 +148,7 @@ ensure_program_root_binding
 unset CORP_HARNESS_PROGRAM_ROOT || true
 
 collected="$(python3 -m pytest --collect-only -q tests/test_trust_runtime.py tests/test_site_gate_oracles.py)"
-for name in "${REQUIRED_LOG_TESTS[@]}" "${REQUIRED_AH_TESTS[@]}" "${REQUIRED_TRR_TESTS[@]}" "${REQUIRED_SGO_TESTS[@]}"; do
+for name in "${REQUIRED_LOG_TESTS[@]}" "${REQUIRED_AH_TESTS[@]}" "${REQUIRED_TRR_TESTS[@]}" "${REQUIRED_SGO_TESTS[@]}" "${REQUIRED_FC_TESTS[@]}"; do
   if ! grep -q "::${name}$" <<<"${collected}"; then
     echo "verify.sh: missing collected test: ${name}" >&2
     exit 1

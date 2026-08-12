@@ -38,6 +38,7 @@ from corp_harness.runtime_engine import (
     mint_mutation_permit,
     mutation_permit_path,
     read_trust_log,
+    recover_trust_chain,
     report_anti_harness_event,
     require_heavy_available,
     require_verifiable_trust_log,
@@ -267,6 +268,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="optional protected path relative to program or factory root",
     )
     trust_report.add_argument("--event-id", help="optional TrustEvent event_id")
+    trust_recover = trust_sub.add_parser(
+        "recover-chain",
+        help="user-only seal of a broken trust log (no wipe, no set-score)",
+    )
+    _root_argument(trust_recover)
+    trust_recover.add_argument("--actor", required=True)
+    trust_recover.add_argument("--apply", action="store_true")
     return parser
 
 
@@ -739,6 +747,16 @@ def _trust(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
             },
             program_root,
         ), 0
+    if args.trust_command == "recover-chain":
+        payload = recover_trust_chain(
+            program_root,
+            actor=str(args.actor),
+            apply=bool(args.apply),
+            program_id=program.program_id,
+        )
+        if args.apply and payload.get("recovered"):
+            update_surface_baseline(program_root, factory_root=factory_root)
+        return attach_trust_status(payload, program_root), 0
     raise ContractError(f"unsupported trust command: {args.trust_command!r}")
 
 
@@ -788,6 +806,7 @@ def _authorized_mutating_apply(
             "trust-state.json",
             "trust-event-log.jsonl",
             "trust-log-anchor.json",
+            "trust-chain-recovery.json",
             "trust-mutation-permit.json",
         }
     )

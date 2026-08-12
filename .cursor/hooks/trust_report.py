@@ -36,6 +36,7 @@ CORPORATE_FILES = frozenset(
         "trust-event-log.jsonl",
         "trust-mutation-permit.json",
         "trust-log-anchor.json",
+        "trust-chain-recovery.json",
         "trust-surface-baseline.json",
         "master-spec.md",
         "acceptance.json",

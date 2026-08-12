@@ -2128,3 +2128,183 @@ def test_TRR_002b_assist_oserror_sg03_preserved(
     assert payload["error"] == GOV_ASSIST_UNAVAILABLE
     assert payload["assist"] is True
     assert payload["ok"] is False
+
+
+def _fork_duplicate_seq(root: Path) -> None:
+    path = tre.trust_event_log_path(root)
+    lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    last = json.loads(lines[-1])
+    fork = json.loads(json.dumps(last))
+    fork["recorded_at"] = "2099-01-01T00:00:00Z"
+    body = {key: value for key, value in fork.items() if key != "entry_hash"}
+    fork["entry_hash"] = tre.canonical_log_entry_hash(body)
+    lines.append(json.dumps(fork, sort_keys=True, separators=(",", ":")))
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def test_FC_RECOVER_001_agent_actor_refused(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _, root, _ = _minimal_program(tmp_path)
+    digest = digest_path(root / "program.json")
+    tre.emit_and_apply(
+        root, kind="strict_success", program_digest=digest, event_id="fc-rec-seed"
+    )
+    _fork_duplicate_seq(root)
+    code = main(
+        [
+            "trust",
+            "recover-chain",
+            "--root",
+            str(root),
+            "--actor",
+            "ceo",
+            "--apply",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 3
+    assert payload["ok"] is False
+    assert "unauthorized_actor" in str(payload.get("error") or "")
+    assert not tre.chain_recovery_path(root).is_file()
+
+
+def test_FC_RECOVER_001_user_apply_allows_record(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _, root, _ = _minimal_program(tmp_path)
+    digest = digest_path(root / "program.json")
+    tre.emit_and_apply(
+        root, kind="strict_success", program_digest=digest, event_id="fc-rec-ok"
+    )
+    score_before = tre.load_trust_state(root).trust_score
+    log_before = tre.trust_event_log_path(root).read_text(encoding="utf-8")
+    _fork_duplicate_seq(root)
+    broken = tre.verify_log_chain(root)
+    assert broken["ok"] is False
+    master = _write(root / "master-spec.md", "# Spec\n")
+    blocked = main(
+        [
+            "record",
+            "--root",
+            str(root),
+            "--artifact",
+            "master_spec",
+            "--path",
+            str(master),
+            "--actor",
+            "ceo",
+            "--apply",
+        ]
+    )
+    capsys.readouterr()
+    assert blocked == 3
+    dry = main(
+        ["trust", "recover-chain", "--root", str(root), "--actor", "user"]
+    )
+    dry_payload = json.loads(capsys.readouterr().out)
+    assert dry == 0
+    assert dry_payload["would_recover"] is True
+    assert dry_payload["apply"] is False
+    assert not tre.chain_recovery_path(root).is_file()
+    code = main(
+        [
+            "trust",
+            "recover-chain",
+            "--root",
+            str(root),
+            "--actor",
+            "user",
+            "--apply",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert payload["recovered"] is True
+    assert payload["trust_score"] == float(score_before)
+    assert tre.load_trust_state(root).trust_score == score_before
+    assert tre.chain_recovery_path(root).is_file()
+    recovered = tre.verify_log_chain(root)
+    assert recovered["ok"] is True
+    assert recovered["chain_ok"] is True
+    record_code = main(
+        [
+            "record",
+            "--root",
+            str(root),
+            "--artifact",
+            "master_spec",
+            "--path",
+            str(master),
+            "--actor",
+            "ceo",
+            "--apply",
+        ]
+    )
+    record_payload = json.loads(capsys.readouterr().out)
+    assert record_code == 0
+    assert record_payload["ok"] is True
+    assert tre.trust_event_log_path(root).read_text(encoding="utf-8").startswith(
+        log_before.split("2099-01-01", 1)[0]
+    ) or log_before in tre.trust_event_log_path(root).read_text(encoding="utf-8")
+
+
+def test_FC_LOG_001_concurrent_append_unique_seq(tmp_path: Path) -> None:
+    _, root, _ = _minimal_program(tmp_path)
+    digest = digest_path(root / "program.json")
+    tre.emit_and_apply(
+        root, kind="strict_success", program_digest=digest, event_id="fc-lock-seed"
+    )
+    errors: list[BaseException] = []
+
+    def _worker(index: int) -> None:
+        try:
+            tre.append_trust_log_entry(
+                root,
+                entry_kind="digest_rebind",
+                program_digest=digest,
+                payload={"index": index},
+            )
+        except BaseException as exc:  # noqa: BLE001 — collect for assertion
+            errors.append(exc)
+
+    threading = __import__("threading")
+    workers = [threading.Thread(target=_worker, args=(i,)) for i in range(8)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join()
+    assert errors == []
+    seqs = [int(entry["seq"]) for entry in tre.read_trust_log_entries(root)]
+    assert len(seqs) == len(set(seqs))
+    assert tre.verify_log_chain(root)["ok"] is True
+
+
+def test_FC_SCAN_001_pyc_build_not_oob_without_fa(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _, root, factory = _minimal_program(tmp_path)
+    tre.bind_program_root(factory, root)
+    tre.update_surface_baseline(root, factory_root=factory)
+    pyc = factory / "src" / "corp_harness" / "__pycache__" / "cli.cpython-313.pyc"
+    pyc.parent.mkdir(parents=True, exist_ok=True)
+    pyc.write_bytes(b"pyc")
+    build = (
+        factory
+        / "swift"
+        / ".build"
+        / "arm64-apple-macosx"
+        / "debug"
+        / "index"
+        / "store"
+        / "CGPath.h"
+    )
+    build.parent.mkdir(parents=True, exist_ok=True)
+    build.write_text("noise\n", encoding="utf-8")
+    before = tre.load_trust_state(root).trust_score
+    code = main(["status", "--root", str(root)])
+    capsys.readouterr()
+    assert code == 0
+    assert tre.load_trust_state(root).trust_score == before
+    findings = tre.detect_dirty_surfaces(root, factory_root=factory)
+    assert findings == []

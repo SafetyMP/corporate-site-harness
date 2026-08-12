@@ -38,6 +38,7 @@ PYTHON_SOLE_WRITER_FILES = frozenset(
         "trust-state.json",
         "trust-event-log.jsonl",
         "trust-log-anchor.json",
+        "trust-chain-recovery.json",
         "trust-mutation-permit.json",
     }
 )

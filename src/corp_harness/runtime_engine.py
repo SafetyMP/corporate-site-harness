@@ -27,6 +27,7 @@ TRUST_EVENT_SCHEMA = "corporate-site-trust-event/v1"
 TRUST_CONSEQUENCE_SCHEMA = "corporate-site-trust-consequence/v1"
 TRUST_LOG_ENTRY_SCHEMA = "corporate-site-trust-log-entry/v1"
 TRUST_LOG_ANCHOR_SCHEMA = "corporate-site-trust-log-anchor/v1"
+CHAIN_RECOVERY_SCHEMA = "corporate-site-chain-recovery/v1"
 MUTATION_PERMIT_SCHEMA = "corporate-site-trust-mutation-permit/v1"
 SURFACE_BASELINE_SCHEMA = "corporate-site-trust-surface-baseline/v1"
 SOLE_EMITTER = "python_runtime_engine"
@@ -82,6 +83,7 @@ CORPORATE_PROTECTED_FILES = frozenset(
         "trust-event-log.jsonl",
         "trust-mutation-permit.json",
         "trust-log-anchor.json",
+        "trust-chain-recovery.json",
         "trust-surface-baseline.json",
         "master-spec.md",
         "acceptance.json",
@@ -231,6 +233,10 @@ def trust_event_log_path(program_root: Path) -> Path:
 
 def trust_log_anchor_path(program_root: Path) -> Path:
     return program_root.expanduser().resolve() / "trust-log-anchor.json"
+
+
+def chain_recovery_path(program_root: Path) -> Path:
+    return program_root.expanduser().resolve() / "trust-chain-recovery.json"
 
 
 def mutation_permit_path(program_root: Path) -> Path:
@@ -553,8 +559,111 @@ def find_trust_event_log_entry(
     return None
 
 
+def _nonempty_log_lines(program_root: Path) -> list[str]:
+    path = trust_event_log_path(program_root)
+    if not path.is_file():
+        return []
+    return [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def frozen_log_digest(program_root: Path, line_count: int) -> str:
+    lines = _nonempty_log_lines(program_root)
+    if line_count < 1 or line_count > len(lines):
+        raise ContractError("frozen_line_count does not match trust-event-log.jsonl")
+    blob = "\n".join(lines[:line_count]) + "\n"
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def load_chain_recovery(program_root: Path) -> dict[str, Any] | None:
+    path = chain_recovery_path(program_root)
+    if not path.is_file():
+        return None
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(raw, dict):
+        return None
+    if raw.get("schema") != CHAIN_RECOVERY_SCHEMA:
+        return None
+    if raw.get("authorized") is not True or raw.get("granted_by") != "user":
+        return None
+    try:
+        frozen_n = int(raw.get("frozen_line_count") or 0)
+    except (TypeError, ValueError):
+        return None
+    if frozen_n < 1 or not isinstance(raw.get("frozen_sha256"), str) or not raw["frozen_sha256"]:
+        return None
+    return raw
+
+
+def _verify_entries_strict(
+    entries: list[dict[str, Any]],
+    *,
+    expected_prev: str,
+    expected_seq_start: int,
+) -> dict[str, Any]:
+    expected_prev_local = expected_prev
+    expected_seq = expected_seq_start
+    for entry in entries:
+        if entry.get("schema") != TRUST_LOG_ENTRY_SCHEMA:
+            return {
+                "ok": False,
+                "chain_ok": False,
+                "reason": f"seq={entry.get('seq')}: bad schema",
+                "tip_hash": None,
+                "tip_seq": 0,
+            }
+        if entry.get("entry_kind") not in VERIFY_LOG_ENTRY_KINDS:
+            return {
+                "ok": False,
+                "chain_ok": False,
+                "reason": f"seq={entry.get('seq')}: bad entry_kind",
+                "tip_hash": None,
+                "tip_seq": 0,
+            }
+        if int(entry.get("seq") or 0) != expected_seq:
+            return {
+                "ok": False,
+                "chain_ok": False,
+                "reason": f"expected seq {expected_seq}, got {entry.get('seq')}",
+                "tip_hash": None,
+                "tip_seq": 0,
+            }
+        if entry.get("prev_hash") != expected_prev_local:
+            return {
+                "ok": False,
+                "chain_ok": False,
+                "reason": f"seq={entry.get('seq')}: prev_hash mismatch",
+                "tip_hash": None,
+                "tip_seq": 0,
+            }
+        if not entry_hash_matches(entry):
+            return {
+                "ok": False,
+                "chain_ok": False,
+                "reason": f"seq={entry.get('seq')}: entry_hash mismatch",
+                "tip_hash": None,
+                "tip_seq": 0,
+            }
+        expected_prev_local = str(entry["entry_hash"])
+        expected_seq += 1
+    return {
+        "ok": True,
+        "chain_ok": True,
+        "reason": None,
+        "tip_hash": expected_prev_local if entries else expected_prev,
+        "tip_seq": (expected_seq - 1) if entries else expected_seq_start - 1,
+    }
+
+
 def verify_log_chain(program_root: Path) -> dict[str, Any]:
-    """Recompute hash chain. Empty/missing log is an honest genesis tip."""
+    """Recompute hash chain. Empty/missing log is an honest genesis tip.
+
+    A user-gated trust-chain-recovery.json may seal a frozen broken prefix
+    (duplicate seq / fork). The prefix remains auditable; suffix after
+    frozen_line_count must be a strict chain from the last frozen entry.
+    """
     try:
         entries = read_trust_log_entries(program_root)
     except ContractError as exc:
@@ -566,62 +675,65 @@ def verify_log_chain(program_root: Path) -> dict[str, Any]:
             "tip_hash": None,
             "tip_seq": 0,
         }
-    expected_prev = GENESIS_PREV_HASH
-    for index, entry in enumerate(entries, start=1):
-        if entry.get("schema") != TRUST_LOG_ENTRY_SCHEMA:
-            return {
-                "ok": False,
-                "chain_ok": False,
-                "reason": f"seq={entry.get('seq')}: bad schema",
-                "entries": entries,
-                "tip_hash": None,
-                "tip_seq": 0,
-            }
-        if entry.get("entry_kind") not in VERIFY_LOG_ENTRY_KINDS:
-            return {
-                "ok": False,
-                "chain_ok": False,
-                "reason": f"seq={entry.get('seq')}: bad entry_kind",
-                "entries": entries,
-                "tip_hash": None,
-                "tip_seq": 0,
-            }
-        if int(entry.get("seq") or 0) != index:
-            return {
-                "ok": False,
-                "chain_ok": False,
-                "reason": f"expected seq {index}, got {entry.get('seq')}",
-                "entries": entries,
-                "tip_hash": None,
-                "tip_seq": 0,
-            }
-        if entry.get("prev_hash") != expected_prev:
-            return {
-                "ok": False,
-                "chain_ok": False,
-                "reason": f"seq={entry.get('seq')}: prev_hash mismatch",
-                "entries": entries,
-                "tip_hash": None,
-                "tip_seq": 0,
-            }
-        if not entry_hash_matches(entry):
-            return {
-                "ok": False,
-                "chain_ok": False,
-                "reason": f"seq={entry.get('seq')}: entry_hash mismatch",
-                "entries": entries,
-                "tip_hash": None,
-                "tip_seq": 0,
-            }
-        expected_prev = str(entry["entry_hash"])
-    return {
-        "ok": True,
-        "chain_ok": True,
-        "reason": None,
-        "entries": entries,
-        "tip_hash": expected_prev if entries else GENESIS_PREV_HASH,
-        "tip_seq": len(entries),
-    }
+    recovery = load_chain_recovery(program_root)
+    if recovery is None:
+        result = _verify_entries_strict(
+            entries, expected_prev=GENESIS_PREV_HASH, expected_seq_start=1
+        )
+        result["entries"] = entries
+        return result
+    frozen_n = int(recovery["frozen_line_count"])
+    if frozen_n > len(entries):
+        return {
+            "ok": False,
+            "chain_ok": False,
+            "reason": "chain recovery frozen_line_count exceeds log length",
+            "entries": entries,
+            "tip_hash": None,
+            "tip_seq": 0,
+        }
+    try:
+        actual = frozen_log_digest(program_root, frozen_n)
+    except ContractError as exc:
+        return {
+            "ok": False,
+            "chain_ok": False,
+            "reason": str(exc),
+            "entries": entries,
+            "tip_hash": None,
+            "tip_seq": 0,
+        }
+    if actual != recovery.get("frozen_sha256"):
+        return {
+            "ok": False,
+            "chain_ok": False,
+            "reason": "chain recovery frozen_sha256 mismatch (prefix tamper)",
+            "entries": entries,
+            "tip_hash": None,
+            "tip_seq": 0,
+        }
+    prefix = entries[:frozen_n]
+    suffix = entries[frozen_n:]
+    last_prefix = prefix[-1]
+    max_seq = max(int(entry.get("seq") or 0) for entry in prefix)
+    if not suffix:
+        return {
+            "ok": True,
+            "chain_ok": True,
+            "reason": None,
+            "entries": entries,
+            "tip_hash": str(last_prefix.get("entry_hash") or ""),
+            "tip_seq": max_seq,
+            "recovered": True,
+        }
+    result = _verify_entries_strict(
+        suffix,
+        expected_prev=str(last_prefix.get("entry_hash") or ""),
+        expected_seq_start=max_seq + 1,
+    )
+    result["entries"] = entries
+    result["recovered"] = True
+    return result
 
 
 def read_trust_log(
@@ -674,6 +786,72 @@ def require_verifiable_trust_log(program_root: Path) -> None:
     raise ContractError(f"{GOV_REQUIRED}: broken trust log chain: {reason}")
 
 
+def recover_trust_chain(
+    program_root: Path,
+    *,
+    actor: str,
+    apply: bool = False,
+    program_id: str | None = None,
+) -> dict[str, Any]:
+    """User-only seal of a broken log. Does not wipe, set-score, or mint genesis."""
+    if actor != "user":
+        raise ContractError(
+            "unauthorized_actor: trust recover-chain requires --actor user"
+        )
+    root = program_root.expanduser().resolve()
+    strict = _verify_entries_strict(
+        read_trust_log_entries(root),
+        expected_prev=GENESIS_PREV_HASH,
+        expected_seq_start=1,
+    )
+    state = load_trust_state(root)
+    lines = _nonempty_log_lines(root)
+    payload: dict[str, Any] = {
+        "schema": CHAIN_RECOVERY_SCHEMA,
+        "authorized": True,
+        "granted_by": "user",
+        "program_id": program_id or _program_id(root),
+        "frozen_line_count": len(lines),
+        "frozen_sha256": (
+            frozen_log_digest(root, len(lines)) if lines else ""
+        ),
+        "verify_error": strict.get("reason"),
+        "trust_score": float(state.trust_score),
+        "recovered_at": _now(),
+    }
+    if strict.get("ok") and strict.get("chain_ok"):
+        return {
+            "ok": True,
+            "apply": apply,
+            "recovered": False,
+            "reason": "chain already verifiable",
+            "trust_score": float(state.trust_score),
+        }
+    if not lines:
+        raise ContractError("trust recover-chain requires a non-empty trust-event-log")
+    if not apply:
+        return {
+            "ok": True,
+            "apply": False,
+            "would_recover": True,
+            "trust_score": float(state.trust_score),
+            "recovery": payload,
+        }
+    path = chain_recovery_path(root)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    after = load_trust_state(root)
+    if after.trust_score != state.trust_score:
+        raise ContractError("trust recover-chain must not change trust_score")
+    return {
+        "ok": True,
+        "apply": True,
+        "recovered": True,
+        "trust_score": float(after.trust_score),
+        "recovery": payload,
+        "path": str(path),
+    }
+
+
 def append_trust_log_entry(
     program_root: Path,
     *,
@@ -686,38 +864,44 @@ def append_trust_log_entry(
     if entry_kind not in LOG_ENTRY_KINDS:
         raise ContractError(f"unknown trust log entry_kind: {entry_kind!r}")
     root = program_root.expanduser().resolve()
-    existing = read_trust_log_entries(root)
-    if existing:
-        prev_hash = str(existing[-1].get("entry_hash") or "")
-        if not prev_hash:
-            raise ContractError("trust-event-log tip missing entry_hash")
-        seq = int(existing[-1].get("seq") or len(existing)) + 1
-    else:
-        prev_hash = GENESIS_PREV_HASH
-        seq = 1
-    recorded_at = _now()
-    body: dict[str, Any] = {
-        "schema": TRUST_LOG_ENTRY_SCHEMA,
-        "seq": seq,
-        "entry_kind": entry_kind,
-        "prev_hash": prev_hash,
-        "program_digest": program_digest,
-        "recorded_at": recorded_at,
-        "payload": payload,
-    }
-    entry_hash = canonical_log_entry_hash(body)
-    entry = {**body, "entry_hash": entry_hash}
     log_path = trust_event_log_path(root)
-    with log_path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(entry, sort_keys=True, separators=(",", ":")) + "\n")
-    if seq == 1:
-        _mint_trust_log_anchor(
-            root,
-            program_id=program_id or _program_id(root),
-            first_entry_hash=entry_hash,
-            initialized_at=recorded_at,
-        )
-    return entry
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = log_path.with_suffix(log_path.suffix + ".lock")
+    with lock_path.open("a+", encoding="utf-8") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        existing = read_trust_log_entries(root)
+        if existing:
+            prev_hash = str(existing[-1].get("entry_hash") or "")
+            if not prev_hash:
+                raise ContractError("trust-event-log tip missing entry_hash")
+            seq = int(existing[-1].get("seq") or len(existing)) + 1
+        else:
+            prev_hash = GENESIS_PREV_HASH
+            seq = 1
+        recorded_at = _now()
+        body: dict[str, Any] = {
+            "schema": TRUST_LOG_ENTRY_SCHEMA,
+            "seq": seq,
+            "entry_kind": entry_kind,
+            "prev_hash": prev_hash,
+            "program_digest": program_digest,
+            "recorded_at": recorded_at,
+            "payload": payload,
+        }
+        entry_hash = canonical_log_entry_hash(body)
+        entry = {**body, "entry_hash": entry_hash}
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry, sort_keys=True, separators=(",", ":")) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        if seq == 1:
+            _mint_trust_log_anchor(
+                root,
+                program_id=program_id or _program_id(root),
+                first_entry_hash=entry_hash,
+                initialized_at=recorded_at,
+            )
+        return entry
 
 
 def _mint_trust_log_anchor(
@@ -1428,6 +1612,15 @@ def is_factory_d8_path(rel: str) -> bool:
     return any(normalized == p.rstrip("/") or normalized.startswith(p) for p in FACTORY_D8_PREFIXES)
 
 
+def is_generated_d8_noise(rel: str) -> bool:
+    """Build/cache artifacts are not D8 OOB for a live factory working tree."""
+    normalized = rel.lstrip("./")
+    parts = Path(normalized).parts
+    if "__pycache__" in parts or ".build" in parts:
+        return True
+    return normalized.endswith(".pyc") or normalized.endswith(".pyo")
+
+
 def is_corporate_protected_path(rel: str) -> bool:
     normalized = rel.lstrip("./")
     if normalized in CORPORATE_PROTECTED_FILES:
@@ -1466,7 +1659,10 @@ def collect_factory_d8_digests(factory_root: Path) -> dict[str, str]:
             continue
         for path in sorted(base.rglob("*")):
             if path.is_file():
-                digests[_relative_posix(path, factory)] = digest_path(path)
+                rel = _relative_posix(path, factory)
+                if is_generated_d8_noise(rel):
+                    continue
+                digests[rel] = digest_path(path)
     cursor = factory / ".cursor"
     if cursor.is_dir():
         for path in sorted(cursor.rglob("*")):
@@ -1633,6 +1829,8 @@ def detect_dirty_surfaces(
     factory_base = baseline.get("factory") if isinstance(baseline.get("factory"), dict) else {}
     current_factory = collect_factory_d8_digests(factory)
     for rel, prior in factory_base.items():
+        if is_generated_d8_noise(rel):
+            continue
         current = current_factory.get(rel)
         if current == prior:
             continue
@@ -1647,6 +1845,8 @@ def detect_dirty_surfaces(
         )
     for rel, current in current_factory.items():
         if rel in factory_base:
+            continue
+        if is_generated_d8_noise(rel):
             continue
         if authorize_paths_with_permit(root, paths=[rel], now=now):
             continue
