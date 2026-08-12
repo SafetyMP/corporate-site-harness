@@ -1,0 +1,35 @@
+{
+  "schema": "adversarial_corpus/v1",
+  "deny_case_extension": {
+    "mode": "append_only_findings",
+    "corpus_dir": "tests/fixtures/site-gate-oracles/deny-cases",
+    "hook_present": true
+  },
+  "executed_cells": [
+    {
+      "deny_id": "mock_engine_swap",
+      "executed": true,
+      "denied": true,
+      "enforcement_path": "handoff-v2",
+      "report_entry_id": "SGO-003"
+    },
+    {
+      "deny_id": "frozen_yaml_replay",
+      "executed": true,
+      "denied": true,
+      "enforcement_path": "adversarial-corpus",
+      "report_entry_id": "SGO-008"
+    },
+    {
+      "deny_id": "unwired_fail_closed_helper",
+      "executed": true,
+      "denied": true,
+      "enforcement_path": "call-site-wiring",
+      "report_entry_id": "SGO-006"
+    }
+  ],
+  "uncovered_cells": [],
+  "result": "PASS",
+  "captured_at": "2026-08-12T22:00:00Z",
+  "producer": "site-specialist"
+}

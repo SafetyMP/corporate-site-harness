@@ -13,9 +13,12 @@ Human-oriented lifecycle and stakeholder map: [docs/HOW_IT_WORKS.md](docs/HOW_IT
 
 `verification_scripts` must bind to site-relative `scripts/harness` (only
 `verify.sh` and `adversarial.sh`). Optional `scripts/verify.sh` wrappers are outside
-that digest. Keep role instructions short. Put enforceable behavior in code and tests.
-A passing gate must reference the current artifact digest; the harness never grants
-user approval.
+that digest. Newly recorded `corporate_handoff` artifacts use
+`corporate-site-handoff/v2` with `site_gate_oracles` (official engine, parity,
+wiring, inventory, deny-case extension). Oracle evidence files must not live in
+`scripts/harness`. Keep role instructions short. Put enforceable behavior in code
+and tests. A passing gate must reference the current artifact digest; the harness
+never grants user approval.
 
 ## Factory vs product
 

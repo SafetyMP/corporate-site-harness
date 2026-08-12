@@ -1,0 +1,58 @@
+{
+  "schema": "surface_inventory/v1",
+  "taxonomy_version": "CR-8",
+  "cells": [
+    {
+      "id": "listen_bind",
+      "taxonomy": "listen_bind",
+      "verdict": "OOS",
+      "owner": "factory-platform",
+      "residual_risk": "corp-harness is a CLI; no listen port in this checkout",
+      "probe_ref": null
+    },
+    {
+      "id": "cors",
+      "taxonomy": "cors",
+      "verdict": "OOS",
+      "owner": "factory-platform",
+      "residual_risk": "no HTTP server in factory CLI",
+      "probe_ref": null
+    },
+    {
+      "id": "metrics_authn",
+      "taxonomy": "metrics_authn",
+      "verdict": "OOS",
+      "owner": "factory-platform",
+      "residual_risk": "no metrics endpoint in factory CLI",
+      "probe_ref": null
+    },
+    {
+      "id": "host_eval_fallback",
+      "taxonomy": "host_eval_fallback",
+      "verdict": "EXEC",
+      "owner": "factory-platform",
+      "residual_risk": null,
+      "probe_ref": "tests/test_site_gate_oracles.py::test_SGO_003_cedar_fixture_mock_engine_swap_fails"
+    },
+    {
+      "id": "sandbox_fallback",
+      "taxonomy": "sandbox_fallback",
+      "verdict": "OOS",
+      "owner": "factory-platform",
+      "residual_risk": "no product sandbox runtime in factory CLI",
+      "probe_ref": null
+    },
+    {
+      "id": "daemon_bind",
+      "taxonomy": "daemon_bind",
+      "verdict": "OOS",
+      "owner": "factory-platform",
+      "residual_risk": "no cedar-daemon in factory CLI",
+      "probe_ref": null
+    }
+  ],
+  "missing_cells": [],
+  "result": "PASS",
+  "captured_at": "2026-08-12T22:00:00Z",
+  "producer": "site-specialist"
+}

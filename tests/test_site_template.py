@@ -27,6 +27,24 @@ def test_site_template_config_is_valid_json() -> None:
     assert config["schema"] == "corporate-site-site/v1"
     assert config["verify_argv"] == ["./scripts/harness/verify.sh"]
     assert config["adversarial_argv"] == ["./scripts/harness/adversarial.sh"]
+    assert config["policy_engine"] == "none"
+
+
+def test_SGO_011_template_verify_has_engine_or_na_hook() -> None:
+    verify = (TEMPLATE / "scripts/harness/verify.sh").read_text(encoding="utf-8")
+    assert "policy_engine" in verify
+
+
+def test_SGO_011_template_adversarial_has_deny_case_extension_protocol() -> None:
+    adversarial = (TEMPLATE / "scripts/harness/adversarial.sh").read_text(encoding="utf-8")
+    assert "deny-case" in adversarial or "deny_case" in adversarial
+    assert "evidence/site-gate-oracles" in adversarial
+
+
+def test_SGO_011_template_always_green_stub_not_oracle_evidence() -> None:
+    adversarial = (TEMPLATE / "scripts/harness/adversarial.sh").read_text(encoding="utf-8")
+    assert "adversarial-corpus.json" in adversarial
+    assert "exit 0" not in adversarial.split("pytest")[0] or "missing deny-case" in adversarial
 
 
 def test_site_template_docs_prescribe_harness_verification_scripts() -> None:

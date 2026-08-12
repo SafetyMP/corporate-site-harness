@@ -1,0 +1,5 @@
+{
+  "id": "mock_engine_swap",
+  "finding": "TypeScript Cedar mock / evaluateSimulator must not satisfy official-engine evidence",
+  "expected": "deny"
+}

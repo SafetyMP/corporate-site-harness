@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 
 import pytest
+from sgo_testutil import write_v2_handoff
 
 from corp_harness.model import ContractError, Program, digest_path
 
@@ -148,7 +149,7 @@ def advance_to_adversary(tmp_path: Path) -> tuple[Program, Path, Path]:
         "coo",
         root,
     )
-    handoff = write(root / "corporate-handoff.json", "{}\n")
+    handoff = write_v2_handoff(root, site, program, pending=False)
     program.record_artifact("corporate_handoff", handoff, "coo", root)
     program.advance("SITE_DELIVERY", "coo")
 
@@ -437,7 +438,7 @@ def test_pass_gate_rejects_failed_executable_evidence(tmp_path: Path) -> None:
     program.advance("CORPORATE_ACCEPTANCE", "ceo")
     corporate = gate_report(program, root, "corporate_acceptance", "coo")
     program.record_gate("corporate_acceptance", "PASS", corporate, "coo", root)
-    handoff = write(root / "handoff.json", "{}\n")
+    handoff = write_v2_handoff(root, site, program, pending=False, filename="handoff.json")
     program.record_artifact("corporate_handoff", handoff, "coo", root)
     program.advance("SITE_DELIVERY", "coo")
     harness = site / "scripts" / "harness"

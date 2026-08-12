@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
+from sgo_testutil import write_v2_handoff
 
 from corp_harness.cli import build_parser, main
 from corp_harness.model import Gate, Program, digest_path
@@ -116,7 +117,7 @@ def _review_only_ca_program(tmp_path: Path) -> tuple[Program, Path, Path]:
         revision=program.revision,
         reviewer_role="coo",
     )
-    handoff = _write(root / "corporate-handoff.json", "{}\n")
+    handoff = write_v2_handoff(root, factory, program, pending=True)
     program.record_artifact("corporate_handoff", handoff, "coo", root)
     # Advance without requiring current CA (phase write only for the fixture).
     path = root / "program.json"
@@ -610,6 +611,31 @@ def test_check_handoff_detects_digest_mismatch(
     checks = check["artifact_digest_checks"]
     assert any(c["name"] == "master_spec" and c["match"] is False for c in checks)
     assert master_sha != ("0" * 64)
+
+
+def test_SGO_012_check_handoff_reports_schema_and_oracle_pin_currency(
+    gov_stub_env: Path,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    _program, root, _factory = _review_only_ca_program(tmp_path)
+    assert main(["gov", "check-handoff", "--root", str(root)]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    check = payload["handoff"]
+    assert check["schema"] == "corporate-site-handoff/v2"
+    assert "oracle_pins" in check
+    assert check["implies_current_corporate_acceptance_pass"] is False
+
+
+def test_SGO_012_handoff_currentness_does_not_imply_ca_pass(
+    gov_stub_env: Path,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    _program, root, _factory = _review_only_ca_program(tmp_path)
+    assert main(["gov", "check-handoff", "--root", str(root)]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["handoff"]["implies_current_corporate_acceptance_pass"] is False
 
 
 def test_ACC_P1_001_soft_fail_without_binary(
