@@ -10,6 +10,7 @@
 Record `verification_scripts` as the site directory `scripts/harness` (exactly those
 two scripts). Optional wrappers may remain at `scripts/verify.sh` /
 `scripts/adversarial.sh` for humans; they are outside the digest boundary.
+Oracle evidence (`site_gate_oracles`) lives outside `scripts/harness`.
 
 The corporate handoff fixes scope. The site manager assigns ADRs; site specialists write;
 operations excellence reviews current evidence. Work in isolated roots, never edit

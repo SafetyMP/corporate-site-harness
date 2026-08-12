@@ -1,0 +1,27 @@
+{
+  "schema": "enforcement_path_parity/v1",
+  "fixture": {
+    "principal": "Program::\"site-gate-oracle\"",
+    "action": "Action::\"record_handoff\"",
+    "resource": "Resource::\"corporate_handoff\""
+  },
+  "paths": [
+    {
+      "id": "cli-record",
+      "surface": "other",
+      "evaluator_identity": "corp_harness.site_gate_oracles.validate_handoff_schema_v2",
+      "decision": "deny-v1",
+      "reachable": true
+    }
+  ],
+  "shared_evaluator": true,
+  "drift": {
+    "decision": false,
+    "evaluator_identity": false,
+    "undeclared_live_path": false,
+    "gate_side_door": false
+  },
+  "result": "PASS",
+  "captured_at": "2026-08-12T22:00:00Z",
+  "producer": "site-specialist"
+}

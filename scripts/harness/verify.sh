@@ -46,6 +46,16 @@ REQUIRED_AH_TESTS=(
   test_TR_AH_017_trust_gated_cli_surfaces
 )
 
+# ADR-SGO-001 / ACC-SGO (WP-SGO-CORE) — site-gate oracle contract.
+REQUIRED_SGO_TESTS=(
+  test_SGO_001_record_v1_handoff_raises_contract_error
+  test_SGO_002_oracle_evidence_file_in_scripts_harness_rejected
+  test_SGO_003_cedar_fixture_mock_engine_swap_fails
+  test_SGO_006_unit_test_only_helper_fails
+  test_SGO_008_frozen_yaml_without_extension_hook_fails
+  test_SGO_010_verify_still_requires_tr_log_ah_trr_collection
+)
+
 # ADR-TR-004 / ACC-TRR-003 (WP-TR-H) — residual falsifiers + keeper.
 REQUIRED_TRR_TESTS=(
   test_TRR_001_swift_theater_signal_id_seven
@@ -130,8 +140,8 @@ ensure_program_root_binding
 # Scrub inherited bind env so pytest tmp fixtures remain authoritative.
 unset CORP_HARNESS_PROGRAM_ROOT || true
 
-collected="$(python3 -m pytest --collect-only -q tests/test_trust_runtime.py)"
-for name in "${REQUIRED_LOG_TESTS[@]}" "${REQUIRED_AH_TESTS[@]}" "${REQUIRED_TRR_TESTS[@]}"; do
+collected="$(python3 -m pytest --collect-only -q tests/test_trust_runtime.py tests/test_site_gate_oracles.py)"
+for name in "${REQUIRED_LOG_TESTS[@]}" "${REQUIRED_AH_TESTS[@]}" "${REQUIRED_TRR_TESTS[@]}" "${REQUIRED_SGO_TESTS[@]}"; do
   if ! grep -q "::${name}$" <<<"${collected}"; then
     echo "verify.sh: missing collected test: ${name}" >&2
     exit 1

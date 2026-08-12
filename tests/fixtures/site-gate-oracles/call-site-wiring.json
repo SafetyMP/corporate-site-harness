@@ -1,0 +1,21 @@
+{
+  "schema": "call_site_wiring/v1",
+  "symbol": "validate_handoff_schema_v2",
+  "production_module": "src/corp_harness/model.py",
+  "production_refs": [
+    {
+      "file": "src/corp_harness/model.py",
+      "line": 0,
+      "kind": "call"
+    }
+  ],
+  "test_only_refs": [
+    {
+      "file": "tests/test_site_gate_oracles.py",
+      "line": 0
+    }
+  ],
+  "result": "PASS",
+  "captured_at": "2026-08-12T22:00:00Z",
+  "producer": "site-specialist"
+}

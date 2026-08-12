@@ -27,6 +27,7 @@ from corp_harness.model import (
     digest_path,
 )
 from corp_harness.runtime_engine import action_routed_layer, load_trust_state
+from corp_harness.site_gate_oracles import pending_oracle_pins, validate_handoff_schema_v2
 
 GOV_ASSIST_UNAVAILABLE = "GOV_ASSIST_UNAVAILABLE"
 GOV_REQUIRED = "GOV_REQUIRED"
@@ -673,6 +674,21 @@ def _check_handoff(program: Program, program_digest: str) -> dict[str, Any]:
     else:
         integrity_ok = file_current
 
+    oracle_pins: dict[str, Any] = {
+        "schema": schema,
+        "pending": [],
+        "issues": [],
+    }
+    if schema == "corporate-site-handoff/v1":
+        oracle_pins["issues"].append("handoff schema is v1; v2 required for site-gate oracles")
+    elif schema == "corporate-site-handoff/v2":
+        try:
+            validate_handoff_schema_v2(body)
+            oracle_pins["pending"] = pending_oracle_pins(body)
+        except ContractError as exc:
+            oracle_pins["issues"].append(str(exc))
+            issues.append(f"site_gate_oracles: {exc}")
+
     return {
         "handoff": {
             "present": True,
@@ -682,6 +698,7 @@ def _check_handoff(program: Program, program_digest: str) -> dict[str, Any]:
             "current_sha256": current_sha,
             "file_current": file_current,
             "artifact_digest_checks": digest_checks,
+            "oracle_pins": oracle_pins,
             "current": integrity_ok,
             "integrity_ok": integrity_ok,
             "issues": issues,

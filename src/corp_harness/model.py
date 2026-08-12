@@ -23,6 +23,13 @@ from corp_harness.evidence_validation import (
     enforce_pass_evidence_classes,
     executable_evidence_root,
 )
+from corp_harness.site_gate_oracles import (
+    ORACLE_GATES,
+    iter_live_pointers,
+    load_handoff_object,
+    pending_oracle_pins,
+    validate_handoff_schema_v2,
+)
 
 # Facade re-export anchors (currentness flag lives in contracts.py).
 assert VERIFICATION_SCRIPTS_FILES == VERIFICATION_SCRIPTS_REQUIRED
@@ -486,6 +493,8 @@ class Program:
         _require_allowed_path(resolved, program_root.resolve(), site_root)
         if name == "verification_scripts":
             _validate_verification_scripts(resolved, site_root)
+        if name == "corporate_handoff":
+            _validate_corporate_handoff(resolved, site_root)
         digest = digest_path(resolved)
         artifact = Artifact(
             path=str(resolved),
@@ -708,7 +717,21 @@ class Program:
             ):
                 return False
             targets = self._target_artifacts(name)
-            return bool(targets) and _artifact_map_digest(targets) == gate.target_sha256
+            if not (bool(targets) and _artifact_map_digest(targets) == gate.target_sha256):
+                return False
+            if name in ORACLE_GATES:
+                handoff = self.artifacts.get("corporate_handoff")
+                if handoff is None:
+                    return False
+                try:
+                    body = load_handoff_object(Path(handoff.path))
+                    validate_handoff_schema_v2(body)
+                    if pending_oracle_pins(body):
+                        return False
+                    _assert_oracle_pointer_digests_live(body, Path(self.site_path))
+                except ContractError:
+                    return False
+            return True
         except ContractError:
             return False
 
@@ -737,6 +760,13 @@ class Program:
                     _validate_factory_authorization(Path(artifact.path), self)
                 except ContractError as exc:
                     issues.append(f"artifact factory_authorization: {exc}")
+            if name == "corporate_handoff":
+                try:
+                    _validate_corporate_handoff(
+                        Path(artifact.path), Path(self.site_path)
+                    )
+                except ContractError as exc:
+                    issues.append(f"artifact corporate_handoff: {exc}")
         for name in self.gates:
             if not self.gate_is_current(name):
                 issues.append(f"gate {name} is stale")
@@ -829,6 +859,41 @@ def _validate_verification_scripts(path: Path, site_root: Path) -> None:
             "verification_scripts scripts/harness may only contain "
             "verify.sh, adversarial.sh, and optional corporate-acceptance.sh"
         )
+
+
+def _validate_corporate_handoff(path: Path, site_root: Path) -> None:
+    body = load_handoff_object(path)
+    validate_handoff_schema_v2(body)
+    _assert_oracle_pointer_digests_live(body, site_root, allow_pending=True)
+
+
+def _assert_oracle_pointer_digests_live(
+    body: dict[str, Any],
+    site_root: Path,
+    *,
+    allow_pending: bool = False,
+) -> None:
+    site = _resolve_without_symlinks(site_root)
+    for name, pointer in iter_live_pointers(body):
+        sha = pointer.get("sha256")
+        pin_status = pointer.get("pin_status")
+        if sha is None or pin_status == "pending_site_delivery":
+            if allow_pending:
+                continue
+            raise ContractError(f"site_gate_oracles.{name} pin is pending_site_delivery")
+        rel = str(pointer.get("path") or "")
+        target = _resolve_without_symlinks(site / rel)
+        try:
+            target.relative_to(site)
+        except ValueError as exc:
+            raise ContractError(
+                f"site_gate_oracles.{name} path escapes site root"
+            ) from exc
+        live = digest_path(target)
+        if live != sha:
+            raise ContractError(
+                f"site_gate_oracles.{name} digest mismatch: {live} != {sha}"
+            )
 
 
 def digest_path(path: Path) -> str:

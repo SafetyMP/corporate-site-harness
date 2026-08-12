@@ -31,6 +31,13 @@ REQUIRED_AH_TESTS=(
   test_TR_AH_017_trust_gated_cli_surfaces
 )
 
+# ADR-SGO-001 deny-case extension + mock-engine contract (additive).
+REQUIRED_SGO_TESTS=(
+  test_SGO_003_cedar_fixture_mock_engine_swap_fails
+  test_SGO_008_frozen_yaml_without_extension_hook_fails
+  test_SGO_008_append_deny_case_fails_until_enforced
+)
+
 # ADR-TR-004 / ACC-TRR-003 (WP-TR-H) — residual falsifiers + keeper.
 REQUIRED_TRR_TESTS=(
   test_TRR_001_swift_theater_signal_id_seven
@@ -112,8 +119,8 @@ ensure_program_root_binding
 # Scrub inherited bind env so pytest tmp fixtures remain authoritative.
 unset CORP_HARNESS_PROGRAM_ROOT || true
 
-collected="$(python3 -m pytest --collect-only -q tests/test_trust_runtime.py)"
-for name in "${REQUIRED_AH_TESTS[@]}" "${REQUIRED_TRR_TESTS[@]}"; do
+collected="$(python3 -m pytest --collect-only -q tests/test_trust_runtime.py tests/test_site_gate_oracles.py)"
+for name in "${REQUIRED_AH_TESTS[@]}" "${REQUIRED_TRR_TESTS[@]}" "${REQUIRED_SGO_TESTS[@]}"; do
   if ! grep -q "::${name}$" <<<"${collected}"; then
     echo "adversarial.sh: missing collected AH/TRR test: ${name}" >&2
     exit 1

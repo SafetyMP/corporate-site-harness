@@ -13,6 +13,7 @@ behavior is ambiguous. For the end-to-end flow, start with
 | **VS** | Verification scripts binding (`scripts/harness`) |
 | **SGA** | Swift governance assist (read-only; never mutates `program.json`) |
 | **TR** | Trust-routed runtime, event log, anti-harness signals |
+| **SGO** | Site-gate oracles (`corporate-site-handoff/v2`) |
 
 ## Index
 
@@ -45,3 +46,8 @@ behavior is ambiguous. For the end-to-end flow, start with
 - [ADR-TR-002](ADR-TR-002-trust-event-log.md) — Trust event log
 - [ADR-TR-003](ADR-TR-003-anti-harness-trust-events.md) — Anti-harness events
 - [ADR-TR-004](ADR-TR-004-trust-runtime-residuals.md) — Residuals closure
+
+### Site-gate oracles
+
+- [ADR-SGO-001](ADR-SGO-001-site-gate-oracles-handoff-v2.md) — Handoff v2 + `site_gate_oracles`
+- [ADR-SGO-002](ADR-SGO-002-template-oracles-non-regression.md) — Template fail-closed oracles
