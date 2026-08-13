@@ -1,0 +1,12 @@
+---
+description: Factory preToolUse must deny protected writes unless permit or write-set covers the path
+alwaysApply: true
+---
+
+# Before-write deny
+
+Factory `.cursor/hooks.json` must include `preToolUse` (failClosed) that denies
+writes to protected corporate and factory surfaces unless a live mutation
+permit or sealed packet `write_set` covers the path. `afterFileEdit` report-only
+does not satisfy ACC-FC-001. Deny names a legal next among
+`corp-harness mint-mutation-permit|status|route-model|check` or `halt_report`.

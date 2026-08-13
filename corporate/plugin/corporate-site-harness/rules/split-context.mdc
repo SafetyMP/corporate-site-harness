@@ -1,0 +1,11 @@
+---
+description: Split-context reviewers; child prose is not gate evidence
+alwaysApply: true
+---
+
+# Split-context reviewers
+
+ops-excellence, adversary, and conformance reviewers launch as a NEW Task.
+Parent must not reuse the implementer chat/session. Reviewer prompt is
+packet_id + current artifact digests + oracle command only — no implementer
+JSON or pass-claims. Child prose is not gate evidence.

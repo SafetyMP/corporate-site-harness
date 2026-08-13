@@ -1,6 +1,12 @@
 {
   "version": 1,
   "hooks": {
+    "preToolUse": [
+      {
+        "command": "python3 .cursor/hooks/trust_report.py --event preToolUse",
+        "failClosed": true
+      }
+    ],
     "afterFileEdit": [
       {
         "command": "python3 .cursor/hooks/trust_report.py --event afterFileEdit"

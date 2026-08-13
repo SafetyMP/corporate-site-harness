@@ -24,6 +24,9 @@ SAFE_ENV_KEYS = {
     "PYTHONPATH",
     "TMPDIR",
     "VIRTUAL_ENV",
+    # Session-active corporate root. Must reach verify.sh / dirty-scan children
+    # so check --run binds the env-selected program, not a sibling marker.
+    "CORP_HARNESS_PROGRAM_ROOT",
     # Site oracles (verify/adversarial) may need a provisioned app DSN + JWT for
     # nested Postgres proof. Values are redacted from captured stdout/stderr.
     "DATABASE_URL",

@@ -17,6 +17,14 @@ from pathlib import Path
 PROGRAM_ROOT_ENV = "CORP_HARNESS_PROGRAM_ROOT"
 PROGRAM_ROOT_MARKER = ".corp-harness-program-root"
 
+_FACTORY_SRC = Path(__file__).resolve().parents[2] / "src"
+if _FACTORY_SRC.is_dir() and str(_FACTORY_SRC) not in sys.path:
+    sys.path.insert(0, str(_FACTORY_SRC))
+try:
+    from corp_harness.runtime_engine import evaluate_pretooluse
+except ImportError:  # pragma: no cover - hook copied without factory src
+    evaluate_pretooluse = None  # type: ignore[misc, assignment]
+
 FACTORY_PREFIXES = (
     "src/corp_harness/",
     "swift/",
@@ -36,6 +44,7 @@ CORPORATE_FILES = frozenset(
         "trust-event-log.jsonl",
         "trust-mutation-permit.json",
         "trust-log-anchor.json",
+        "trust-chain-recovery.json",
         "trust-surface-baseline.json",
         "master-spec.md",
         "acceptance.json",
@@ -115,6 +124,41 @@ def _permit_covers(program_root: Path, rel: str) -> bool:
     return any(str(p) == rel or rel.startswith(str(p).rstrip("/") + "/") for p in paths)
 
 
+def _normalize_hook_rel(rel: str) -> str:
+    normalized = rel.replace("\\", "/").strip()
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    return normalized
+
+
+def _permit_or_write_set_covers(program_root: Path, rel: str) -> bool:
+    if _permit_covers(program_root, rel):
+        return True
+    env = os.environ.get("CORP_HARNESS_ACTIVE_PACKET", "").strip()
+    candidates = []
+    if env:
+        candidates.append(Path(env).expanduser())
+    candidates.append(program_root / "trust-active-write-set.json")
+    normalized = _normalize_hook_rel(rel)
+    for path in candidates:
+        if not path.is_file():
+            continue
+        try:
+            body = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        raw = body.get("write_set") if isinstance(body, dict) else None
+        if not isinstance(raw, list):
+            continue
+        for surface in raw:
+            if not isinstance(surface, str) or not surface.strip():
+                continue
+            prefix = _normalize_hook_rel(surface).rstrip("/")
+            if normalized == prefix or normalized.startswith(prefix + "/"):
+                return True
+    return False
+
+
 def _marker_establishes_valid_bind(factory: Path, path: Path) -> bool:
     """True when editing the bind marker to a resolvable corporate program root."""
     try:
@@ -150,12 +194,12 @@ def _classify_edit(
         return None
     factory_rel = _rel_to(path, factory)
     if factory_rel and _is_protected_factory(factory_rel):
-        if _permit_covers(program_root, factory_rel):
+        if _permit_or_write_set_covers(program_root, factory_rel):
             return None
         return "out_of_band_mutation", factory_rel
     corp_rel = _rel_to(path, program_root)
     if corp_rel and _is_protected_corporate(corp_rel):
-        if _permit_covers(program_root, corp_rel):
+        if _permit_or_write_set_covers(program_root, corp_rel):
             return None
         return "out_of_band_mutation", corp_rel
     return None
@@ -222,7 +266,7 @@ def _classify_shell(
                 continue
             rel = _rel_to(resolved, root)
             if rel and checker(rel):
-                if _permit_covers(program_root, rel):
+                if _permit_or_write_set_covers(program_root, rel):
                     continue
                 return "out_of_band_mutation", rel
     # Destructive patterns without going through harness CLI fail closed.
@@ -299,7 +343,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--event",
         required=True,
-        choices=("afterFileEdit", "beforeShellExecution"),
+        choices=("afterFileEdit", "beforeShellExecution", "preToolUse"),
     )
     args = parser.parse_args(argv)
     try:
@@ -313,8 +357,26 @@ def main(argv: list[str] | None = None) -> int:
     program_root = _resolve_program_root(factory)
     if program_root is None:
         # Ordinary / unbound coding: soft-allow (no trust mutation).
-        if args.event == "beforeShellExecution":
+        if args.event in {"beforeShellExecution", "preToolUse"}:
             _emit_shell_permission("allow")
+        return 0
+
+    if args.event == "preToolUse":
+        if evaluate_pretooluse is None:
+            json.dump(
+                {
+                    "permission": "deny",
+                    "agent_message": "preToolUse runtime unavailable",
+                },
+                sys.stdout,
+            )
+            sys.stdout.write("\n")
+            return 2
+        decision = evaluate_pretooluse(factory, program_root, payload)
+        json.dump(decision, sys.stdout)
+        sys.stdout.write("\n")
+        if decision.get("permission") == "deny":
+            return 2
         return 0
 
     if args.event == "afterFileEdit":

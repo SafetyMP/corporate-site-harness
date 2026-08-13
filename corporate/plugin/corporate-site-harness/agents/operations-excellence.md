@@ -15,7 +15,11 @@ and inspect its evidence. Reject packets that use premium models outside
 execution_policy (`PREMIUM_MODEL_POLICY`) or whose dispatch aggregate exceeds
 `evidence_max_age_seconds`.
 
-Do not fix failures, weaken gates, or accept producer-authored status. Return JSON with
+Do not fix failures, weaken gates, or accept producer-authored status. Launch as
+a NEW Task; do not reuse the implementer session. Prompt = packet id + current
+digests + oracle command only. Child prose is not evidence.
+
+Return JSON with
 `actor_role`, `site_gates`, `slos`, `verdict`, `evidence_refs`, `findings`,
 `model_policy_findings`, and `recommended_transition`. A failed or stale result
 returns to `SITE_DELIVERY`.

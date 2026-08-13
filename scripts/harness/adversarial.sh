@@ -118,6 +118,7 @@ ensure_program_root_binding
 
 # Scrub inherited bind env so pytest tmp fixtures remain authoritative.
 unset CORP_HARNESS_PROGRAM_ROOT || true
+unset CORP_HARNESS_ACTIVE_PACKET || true
 
 collected="$(python3 -m pytest --collect-only -q tests/test_trust_runtime.py tests/test_site_gate_oracles.py)"
 for name in "${REQUIRED_AH_TESTS[@]}" "${REQUIRED_TRR_TESTS[@]}" "${REQUIRED_SGO_TESTS[@]}"; do

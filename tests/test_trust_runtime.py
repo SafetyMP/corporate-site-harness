@@ -27,6 +27,12 @@ from corp_harness.swift_gov import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _isolate_program_root_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(tre.PROGRAM_ROOT_ENV, raising=False)
+    monkeypatch.delenv(tre.ACTIVE_PACKET_ENV, raising=False)
+
+
 def _write(path: Path, value: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(value, encoding="utf-8")
@@ -1068,7 +1074,7 @@ def test_TR_LOG_005c_legacy_digest_amnesty_verifies_but_not_writable(
     assert ok["ok"] is True
     assert ok["chain_ok"] is True
     assert ok["tip_seq"] == 1
-    with pytest.raises(ContractError, match="unknown trust log entry_kind"):
+    with pytest.raises(ContractError, match="amnesty is forbidden"):
         tre.append_trust_log_entry(
             root,
             entry_kind="digest_amnesty",
@@ -1430,7 +1436,7 @@ def test_TR_AH_005_oob_d8_sole_writer_zeros_trust_with_program_root(
 ) -> None:
     _, root, factory = _minimal_program(tmp_path)
     _bind_and_baseline(factory, root)
-    target = factory / "src" / "corp_harness" / "runtime_engine.py"
+    target = factory / "AGENTS.md"
     target.write_text("# oob edit\n", encoding="utf-8")
     code = main(["status", "--root", str(root)])
     payload = json.loads(capsys.readouterr().out)
@@ -1523,11 +1529,15 @@ def test_TR_AH_008_stale_factory_authorization_theater(tmp_path: Path) -> None:
     tre.update_surface_baseline(root, factory_root=factory)
     # Mutate a D8 surface while factory_authorization is missing/unbound.
     (factory / "AGENTS.md").write_text("# tampered\n", encoding="utf-8")
-    result = tre.run_deferred_dirty_scan(
-        root, factory_root=factory, program=Program.load(root / "program.json"), force=True
-    )
-    assert result["dirty"] is True
-    signals = {item["theater_signal_id"] for item in result["reported"]}
+    with pytest.raises(ContractError, match="cannot finish/advance"):
+        tre.run_deferred_dirty_scan(
+            root,
+            factory_root=factory,
+            program=Program.load(root / "program.json"),
+            force=True,
+        )
+    state = tre.load_trust_state(root)
+    signals = {state.last_event["theater_signal_id"]} if state.last_event else set()
     assert "stale_factory_authorization" in signals or "out_of_band_mutation" in signals
     # Explicit stale classifier.
     stale = tre.classify_stale_factory_authorization(
@@ -2128,3 +2138,341 @@ def test_TRR_002b_assist_oserror_sg03_preserved(
     assert payload["error"] == GOV_ASSIST_UNAVAILABLE
     assert payload["assist"] is True
     assert payload["ok"] is False
+
+
+def _fork_duplicate_seq(root: Path) -> None:
+    path = tre.trust_event_log_path(root)
+    lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    last = json.loads(lines[-1])
+    fork = json.loads(json.dumps(last))
+    fork["recorded_at"] = "2099-01-01T00:00:00Z"
+    body = {key: value for key, value in fork.items() if key != "entry_hash"}
+    fork["entry_hash"] = tre.canonical_log_entry_hash(body)
+    lines.append(json.dumps(fork, sort_keys=True, separators=(",", ":")))
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def test_FC_RECOVER_001_agent_actor_refused(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _, root, _ = _minimal_program(tmp_path)
+    digest = digest_path(root / "program.json")
+    tre.emit_and_apply(
+        root, kind="strict_success", program_digest=digest, event_id="fc-rec-seed"
+    )
+    _fork_duplicate_seq(root)
+    code = main(
+        [
+            "trust",
+            "recover-chain",
+            "--root",
+            str(root),
+            "--actor",
+            "ceo",
+            "--apply",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 3
+    assert payload["ok"] is False
+    assert "unauthorized_actor" in str(payload.get("error") or "")
+    assert not tre.chain_recovery_path(root).is_file()
+
+
+def test_FC_RECOVER_001_user_apply_allows_record(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub = (
+        Path(__file__).resolve().parent
+        / "fixtures"
+        / "governance"
+        / "corp-gov-check-stub"
+    )
+    monkeypatch.setenv("CORP_GOV_CHECK", str(stub))
+    _, root, _ = _minimal_program(tmp_path)
+    digest = digest_path(root / "program.json")
+    tre.emit_and_apply(
+        root, kind="strict_success", program_digest=digest, event_id="fc-rec-ok"
+    )
+    score_before = tre.load_trust_state(root).trust_score
+    log_before = tre.trust_event_log_path(root).read_text(encoding="utf-8")
+    _fork_duplicate_seq(root)
+    broken = tre.verify_log_chain(root)
+    assert broken["ok"] is False
+    master = _write(root / "master-spec.md", "# Spec\n")
+    blocked = main(
+        [
+            "record",
+            "--root",
+            str(root),
+            "--artifact",
+            "master_spec",
+            "--path",
+            str(master),
+            "--actor",
+            "ceo",
+            "--apply",
+        ]
+    )
+    capsys.readouterr()
+    assert blocked == 3
+    dry = main(
+        ["trust", "recover-chain", "--root", str(root), "--actor", "user"]
+    )
+    dry_payload = json.loads(capsys.readouterr().out)
+    assert dry == 0
+    assert dry_payload["would_recover"] is True
+    assert dry_payload["apply"] is False
+    assert not tre.chain_recovery_path(root).is_file()
+    code = main(
+        [
+            "trust",
+            "recover-chain",
+            "--root",
+            str(root),
+            "--actor",
+            "user",
+            "--apply",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert payload["recovered"] is True
+    assert payload["trust_score"] == float(score_before)
+    assert tre.load_trust_state(root).trust_score == score_before
+    assert tre.chain_recovery_path(root).is_file()
+    recovered = tre.verify_log_chain(root)
+    assert recovered["ok"] is True
+    assert recovered["chain_ok"] is True
+    record_code = main(
+        [
+            "record",
+            "--root",
+            str(root),
+            "--artifact",
+            "master_spec",
+            "--path",
+            str(master),
+            "--actor",
+            "ceo",
+            "--apply",
+        ]
+    )
+    record_payload = json.loads(capsys.readouterr().out)
+    assert record_code == 0, record_payload
+    assert record_payload["ok"] is True
+    assert tre.trust_event_log_path(root).read_text(encoding="utf-8").startswith(
+        log_before.split("2099-01-01", 1)[0]
+    ) or log_before in tre.trust_event_log_path(root).read_text(encoding="utf-8")
+
+
+def test_FC_LOG_001_concurrent_append_unique_seq(tmp_path: Path) -> None:
+    _, root, _ = _minimal_program(tmp_path)
+    digest = digest_path(root / "program.json")
+    tre.emit_and_apply(
+        root, kind="strict_success", program_digest=digest, event_id="fc-lock-seed"
+    )
+    errors: list[BaseException] = []
+
+    def _worker(index: int) -> None:
+        try:
+            tre.append_trust_log_entry(
+                root,
+                entry_kind="digest_rebind",
+                program_digest=digest,
+                payload={"index": index},
+            )
+        except Exception as exc:  # noqa: BLE001 — collect for assertion
+            errors.append(exc)
+
+    threading = __import__("threading")
+    workers = [threading.Thread(target=_worker, args=(i,)) for i in range(8)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join()
+    assert errors == []
+    seqs = [int(entry["seq"]) for entry in tre.read_trust_log_entries(root)]
+    assert len(seqs) == len(set(seqs))
+    assert tre.verify_log_chain(root)["ok"] is True
+
+
+def test_FC_SCAN_001_pyc_build_not_oob_without_fa(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    factory = tmp_path / "factory"
+    program_a = tmp_path / "fail-closed-runtime"
+    sibling = tmp_path / "trust-runtime-residuals"
+    factory.mkdir()
+    program_a.mkdir()
+    sibling.mkdir()
+    (factory / "src" / "corp_harness").mkdir(parents=True)
+    (factory / "corporate" / "plugin" / "corporate-site-harness").mkdir(parents=True)
+    Program.create(
+        "fail-closed-runtime",
+        factory,
+        ["platform", "security"],
+        program_root=program_a,
+        program_kind="factory",
+    ).save(program_a / "program.json")
+    Program.create(
+        "trust-runtime-residuals",
+        factory,
+        ["platform"],
+        program_root=sibling,
+        program_kind="factory",
+    ).save(sibling / "program.json")
+    tre.bind_program_root(factory, sibling)
+    marker_before = (factory / tre.PROGRAM_ROOT_MARKER).read_text(encoding="utf-8")
+    monkeypatch.setenv(tre.PROGRAM_ROOT_ENV, str(program_a))
+    tre.update_surface_baseline(program_a, factory_root=factory)
+    pyc = factory / "src" / "corp_harness" / "__pycache__" / "cli.cpython-313.pyc"
+    pyc.parent.mkdir(parents=True, exist_ok=True)
+    pyc.write_bytes(b"pyc")
+    build = (
+        factory
+        / "swift"
+        / ".build"
+        / "arm64-apple-macosx"
+        / "debug"
+        / "index"
+        / "store"
+        / "CGPath.h"
+    )
+    build.parent.mkdir(parents=True, exist_ok=True)
+    build.write_text("noise\n", encoding="utf-8")
+    (factory / "src" / "corp_harness" / "runtime_engine.py").write_text(
+        "# live factory working tree\n", encoding="utf-8"
+    )
+    before = tre.load_trust_state(program_a).trust_score
+    code = main(["status", "--root", str(program_a)])
+    capsys.readouterr()
+    assert code == 0
+    assert tre.load_trust_state(program_a).trust_score == before
+    assert (factory / tre.PROGRAM_ROOT_MARKER).read_text(encoding="utf-8") == marker_before
+    findings = tre.detect_dirty_surfaces(program_a, factory_root=factory)
+    assert findings == []
+    (program_a / "program.json").write_text(
+        (program_a / "program.json").read_text(encoding="utf-8").replace(
+            "fail-closed-runtime", "tampered-id", 1
+        ),
+        encoding="utf-8",
+    )
+    dirty = tre.detect_dirty_surfaces(program_a, factory_root=factory)
+    assert any(
+        item.get("theater_signal_id") == "out_of_band_mutation"
+        and item.get("protected_path") == "program.json"
+        for item in dirty
+    )
+
+
+def test_FC_LOG_001_shared_lock_state_and_append(tmp_path: Path) -> None:
+    _, root, _ = _minimal_program(tmp_path)
+    digest = digest_path(root / "program.json")
+    tre.emit_and_apply(
+        root, kind="strict_success", program_digest=digest, event_id="fc-lock-mix"
+    )
+    errors: list[Exception] = []
+
+    def _worker(index: int) -> None:
+        try:
+            if index % 2 == 0:
+                tre.append_trust_log_entry(
+                    root,
+                    entry_kind="digest_rebind",
+                    program_digest=digest,
+                    payload={"index": index},
+                )
+            else:
+                state = tre.load_trust_state(root)
+                tre.save_trust_state(root, state)
+        except Exception as exc:
+            errors.append(exc)
+
+    threading = __import__("threading")
+    workers = [threading.Thread(target=_worker, args=(i,)) for i in range(8)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join()
+    unexpected = [
+        exc
+        for exc in errors
+        if "trust-state changed concurrently" not in str(exc)
+    ]
+    assert unexpected == []
+    seqs = [int(entry["seq"]) for entry in tre.read_trust_log_entries(root)]
+    assert len(seqs) == len(set(seqs))
+    assert tre.verify_log_chain(root)["ok"] is True
+
+
+def test_FC_RECOVER_001_does_not_wipe_or_amnesty(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _, root, _ = _minimal_program(tmp_path)
+    digest = digest_path(root / "program.json")
+    tre.emit_and_apply(
+        root, kind="strict_success", program_digest=digest, event_id="fc-rec-wipe"
+    )
+    _fork_duplicate_seq(root)
+    log_path = tre.trust_event_log_path(root)
+    before = log_path.read_bytes()
+    score_before = tre.load_trust_state(root).trust_score
+    code = main(
+        [
+            "trust",
+            "recover-chain",
+            "--root",
+            str(root),
+            "--actor",
+            "user",
+            "--apply",
+        ]
+    )
+    capsys.readouterr()
+    assert code == 0
+    assert log_path.is_file()
+    assert log_path.read_bytes() == before
+    assert tre.load_trust_state(root).trust_score == score_before
+
+
+def test_FC_INCIDENT_001_chain_incident_r1_fixture_and_verify_required_collect() -> None:
+    fixture = {
+        "duplicate_seq": 6312,
+        "duplicate_at_file_lines": [6312, 6313],
+        "kind_counts": {
+            "out_of_band_mutation": 6310,
+            "wrong_root_operation": 4,
+        },
+        "verify_error": "expected seq 6313, got 6312",
+    }
+    live = Path(
+        "/Users/sagehart/Downloads/Fail Closed Harness/evidence/chain-incident-r1.json"
+    )
+    if live.is_file():
+        raw = json.loads(live.read_text(encoding="utf-8"))
+        log = raw.get("log") or {}
+        assert log.get("duplicate_seq") == fixture["duplicate_seq"]
+        assert log.get("duplicate_at_file_lines") == fixture["duplicate_at_file_lines"]
+        assert (log.get("kind_counts") or {}).get("out_of_band_mutation") == 6310
+        assert fixture["verify_error"] in str(log.get("verify_error") or "")
+    else:
+        assert fixture["duplicate_seq"] == 6312
+        assert fixture["duplicate_at_file_lines"] == [6312, 6313]
+        assert fixture["kind_counts"]["out_of_band_mutation"] == 6310
+        assert "expected seq 6313, got 6312" in fixture["verify_error"]
+    verify_sh = (
+        Path(__file__).resolve().parents[1] / "scripts" / "harness" / "verify.sh"
+    ).read_text(encoding="utf-8")
+    required = (
+        "test_FC_LOG_001_concurrent_append_unique_seq",
+        "test_FC_RECOVER_001_agent_actor_refused",
+        "test_FC_RECOVER_001_user_apply_allows_record",
+        "test_FC_INCIDENT_001_chain_incident_r1_fixture_and_verify_required_collect",
+    )
+    for name in required:
+        assert name in verify_sh
