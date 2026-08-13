@@ -13,6 +13,12 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
+from test_fail_closed import (
+    test_FC_EVIDENCE_001_run_evidence_forwards_program_root_env as _fc_evidence_001,
+)
+from test_fail_closed import (
+    test_FC_EVIDENCE_002_leaked_active_packet_write_set_does_not_bypass_deny as _fc_evidence_002,
+)
 
 from corp_harness import runtime_engine as tre
 from corp_harness.cli import main
@@ -2484,3 +2490,17 @@ def test_FC_INCIDENT_001_chain_incident_r1_fixture_and_verify_required_collect()
     )
     for name in required:
         assert name in verify_sh
+
+
+def test_FC_EVIDENCE_001_run_evidence_forwards_program_root_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """G-TPC-002 node id; body retained from WP-FC-007 (ACC-TPC-LEGAL-002)."""
+    _fc_evidence_001(tmp_path, monkeypatch)
+
+
+def test_FC_EVIDENCE_002_leaked_active_packet_write_set_does_not_bypass_deny(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """G-TPC-002 node id; body retained from WP-FC-008 (ACC-TPC-LEGAL-002)."""
+    _fc_evidence_002(tmp_path, monkeypatch)

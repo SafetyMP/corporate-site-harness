@@ -27,6 +27,8 @@ SAFE_ENV_KEYS = {
     # Session-active corporate root. Must reach verify.sh / dirty-scan children
     # so check --run binds the env-selected program, not a sibling marker.
     "CORP_HARNESS_PROGRAM_ROOT",
+    # CORP_HARNESS_ACTIVE_PACKET must NEVER be forwarded (WP-FC-008 /
+    # ACC-TPC-LEGAL-002): oracle pytest must not inherit ops write_set laundering.
     # Site oracles (verify/adversarial) may need a provisioned app DSN + JWT for
     # nested Postgres proof. Values are redacted from captured stdout/stderr.
     "DATABASE_URL",

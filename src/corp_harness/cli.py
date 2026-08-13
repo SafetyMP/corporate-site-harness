@@ -33,7 +33,9 @@ from corp_harness.runtime_engine import (
     THEATER_SIGNAL_IDS,
     TRUST_GATED_CLI_SURFACES,
     apply_covered_skip_void,
+    apply_with_autobind,
     attach_trust_status,
+    auto_bind_active_packet,
     consume_mutation_permit,
     emit_and_apply,
     is_always_force_heavy,
@@ -89,6 +91,11 @@ def build_parser() -> argparse.ArgumentParser:
     action.add_argument("--rework", action="store_true")
     next_parser.add_argument("--actor", required=True)
     next_parser.add_argument("--apply", action="store_true")
+    next_parser.add_argument(
+        "--packet",
+        type=Path,
+        help="attested sealed packet to auto-bind as CORP_HARNESS_ACTIVE_PACKET",
+    )
 
     record_parser = subparsers.add_parser("record", help="record an artifact or gate")
     _root_argument(record_parser)
@@ -99,6 +106,26 @@ def build_parser() -> argparse.ArgumentParser:
     record_parser.add_argument("--actor", required=True)
     record_parser.add_argument("--status", choices=("PASS", "FAIL"))
     record_parser.add_argument("--apply", action="store_true")
+    record_parser.add_argument(
+        "--packet",
+        type=Path,
+        help="attested sealed packet to auto-bind as CORP_HARNESS_ACTIVE_PACKET",
+    )
+
+    apply_parser = subparsers.add_parser(
+        "apply",
+        help=(
+            "auto-bind attested sealed packet write_set and accept covered "
+            "dirty surfaces without a separately minted mutation permit"
+        ),
+    )
+    _root_argument(apply_parser)
+    apply_parser.add_argument(
+        "--packet",
+        type=Path,
+        required=True,
+        help="attested sealed work-order packet (sets CORP_HARNESS_ACTIVE_PACKET)",
+    )
 
     check_parser = subparsers.add_parser("check", help="validate state or run evidence")
     _root_argument(check_parser)
@@ -107,6 +134,11 @@ def build_parser() -> argparse.ArgumentParser:
     check_parser.add_argument("--timeout", type=int, default=120)
     check_parser.add_argument("--output", type=Path)
     check_parser.add_argument("--apply", action="store_true")
+    check_parser.add_argument(
+        "--packet",
+        type=Path,
+        help="attested sealed packet to auto-bind before --apply",
+    )
     check_parser.add_argument(
         "--attest-packet",
         type=Path,
@@ -135,7 +167,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     usage_parser = subparsers.add_parser(
         "usage",
-        help="record or show premium model invoice usage (user actor for record)",
+        help=(
+            "record or show premium model invoice usage "
+            "(--actor user refused; reserved for FA/approval/recover-chain)"
+        ),
     )
     usage_sub = usage_parser.add_subparsers(dest="usage_command", required=True)
     usage_record = usage_sub.add_parser("record", help="record invoice premium spend")
@@ -312,6 +347,9 @@ def dispatch(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
             program.save(path)
         return {"ok": True, "apply": args.apply, "path": str(path), "program": program.to_dict()}, 0
 
+    if args.command == "apply":
+        return _apply_autobind(args)
+
     if args.command == "status":
         program = _load_program(args.root)
         program_root = args.root.expanduser().resolve()
@@ -364,6 +402,7 @@ def dispatch(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
                 program=program,
                 action=action,
                 covered_paths=["program.json"],
+                packet_path=getattr(args, "packet", None),
                 apply_fn=lambda: (
                     program.save(_program_path(args.root)),
                     emit_and_apply(
@@ -429,6 +468,7 @@ def dispatch(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
                 program=program,
                 action=action,
                 covered_paths=covered,
+                packet_path=getattr(args, "packet", None),
                 apply_fn=lambda: (
                     program.save(_program_path(args.root)),
                     emit_and_apply(
@@ -575,8 +615,13 @@ def _usage(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
             "ledger": ledger,
         }, 0
     if args.usage_command == "record":
-        if args.actor != "user":
-            raise ContractError("usage record requires --actor user")
+        # ACC-TPC-LEGAL-003 / TPC-LEGAL-004: --actor user only for FA,
+        # user_approval, and recover-chain — refuse on invoice/usage.
+        if args.actor == "user":
+            raise ContractError(
+                "invoice/usage refuses --actor user "
+                "(reserved for factory_authorization, user_approval, recover-chain)"
+            )
         preview = {
             "ok": True,
             "apply": False,
@@ -711,6 +756,7 @@ def _check(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
                 program=program,
                 action="check_apply",
                 covered_paths=covered,
+                packet_path=getattr(args, "packet", None),
                 apply_fn=_apply,
             )
             issues = program.current_issues(program_root=program_root)
@@ -806,6 +852,37 @@ def _dirty_scan_bound_program_root(*, surface: str) -> dict[str, Any] | None:
     )
 
 
+def _attest_packet_or_raise(program_root: Path, packet_path: Path) -> dict[str, Any]:
+    """Load and attest a sealed packet; raise ContractError when not admitted."""
+    program = Program.load(program_root / "program.json")
+    policy = load_policy_for_program(program_root, program)
+    packet = _load_json_object(packet_path, label="packet")
+    attestation = validate_packet_attestation(packet, policy=policy)
+    if not attestation.get("ok"):
+        raise ContractError(
+            attestation.get("error")
+            or attestation.get("denial_code")
+            or "packet attestation failed"
+        )
+    return packet
+
+
+def _apply_autobind(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
+    """corp-harness apply: auto-bind ACTIVE_PACKET and accept write_set dirt."""
+    program = _load_program(args.root)
+    program_root = args.root.expanduser().resolve()
+    factory_root = Path(program.site_path).expanduser().resolve()
+    packet_path = args.packet.expanduser().resolve()
+    _attest_packet_or_raise(program_root, packet_path)
+    result = apply_with_autobind(
+        program_root,
+        packet_path,
+        factory_root=factory_root,
+        program=program,
+    )
+    return attach_trust_status(result, program_root), 0
+
+
 def _authorized_mutating_apply(
     program_root: Path,
     *,
@@ -814,8 +891,12 @@ def _authorized_mutating_apply(
     action: str,
     covered_paths: list[str],
     apply_fn: Any,
+    packet_path: Path | None = None,
 ) -> None:
-    """Mint permit before dirty scan, then apply, consume, and refresh baseline."""
+    """Auto-bind packet when given, mint permit, dirty-scan, apply, consume."""
+    if packet_path is not None:
+        _attest_packet_or_raise(program_root, packet_path)
+        auto_bind_active_packet(program_root, packet_path)
     covered = sorted(
         {
             *covered_paths,

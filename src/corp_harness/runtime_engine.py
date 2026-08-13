@@ -39,8 +39,11 @@ VOIDED_ACTORS_FILE = "trust-voided-actors.json"
 VOIDED_ACTORS_SCHEMA = "corporate-site-voided-actors/v1"
 THREE_PLANE_NAMES = ("capability", "evidence", "spend")
 MAGNET_CHEAT_BITS = frozenset({"hook_write", "actor_skip", "self_approval"})
+# Transitional (WP-TPC-002): mint and apply both legal next — no gap.
+# WP-TPC-006 removes mint after auto-bind is the sole path.
 LEGAL_NEXT_COMMANDS = (
     "corp-harness mint-mutation-permit",
+    "corp-harness apply",
     "corp-harness status",
     "corp-harness route-model",
     "corp-harness check",
@@ -2017,6 +2020,95 @@ def load_active_write_set(program_root: Path) -> tuple[str, ...]:
         if cleaned:
             return cleaned
     return ()
+
+
+def auto_bind_active_packet(
+    program_root: Path,
+    packet_path: Path,
+) -> dict[str, Any]:
+    """Bind CORP_HARNESS_ACTIVE_PACKET from an attested sealed packet.
+
+    Sets the env var and persists write_set so apply / dirty-scan succeed
+    without a separately minted mutation permit and without the caller
+    manually exporting ACTIVE_PACKET (ACC-TPC-LEGAL-001 / ADR-TPC-001).
+    """
+    root = program_root.expanduser().resolve()
+    path = packet_path.expanduser().resolve()
+    if not path.is_file():
+        raise ContractError(f"active packet not found: {path}")
+    try:
+        body = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ContractError(f"cannot read active packet: {exc}") from exc
+    if not isinstance(body, dict):
+        raise ContractError("active packet must be an object")
+    raw = body.get("write_set")
+    if not isinstance(raw, list) or not raw:
+        raise ContractError("active packet requires nonempty write_set")
+    cleaned = [
+        _normalize_relpath(item)
+        for item in raw
+        if isinstance(item, str) and item.strip()
+    ]
+    if not cleaned:
+        raise ContractError("active packet write_set has no usable paths")
+    os.environ[ACTIVE_PACKET_ENV] = str(path)
+    payload = {
+        "write_set": cleaned,
+        "packet_id": body.get("packet_id"),
+        "packet_path": str(path),
+    }
+    (root / ACTIVE_WRITE_SET_FILE).write_text(
+        json.dumps(payload, indent=2) + "\n", encoding="utf-8"
+    )
+    return {
+        "ok": True,
+        "active_packet": str(path),
+        "write_set": cleaned,
+        "packet_id": body.get("packet_id"),
+        "env": ACTIVE_PACKET_ENV,
+    }
+
+
+def apply_with_autobind(
+    program_root: Path,
+    packet_path: Path,
+    *,
+    factory_root: Path | None = None,
+    program: Program | None = None,
+) -> dict[str, Any]:
+    """Auto-bind packet write_set and accept covered dirty surfaces (no mint)."""
+    root = program_root.expanduser().resolve()
+    bound = auto_bind_active_packet(root, packet_path)
+    loaded = program
+    if loaded is None:
+        program_file = root / "program.json"
+        if program_file.is_file():
+            loaded = Program.load(program_file)
+    factory = (
+        factory_root.expanduser().resolve()
+        if factory_root is not None
+        else (
+            Path(loaded.site_path).expanduser().resolve()
+            if loaded is not None
+            else None
+        )
+    )
+    # No mint_mutation_permit: write_set coverage is the legal path (WP-TPC-002).
+    scan = run_deferred_dirty_scan(
+        root, factory_root=factory, program=loaded, force=True
+    )
+    update_surface_baseline(root, factory_root=factory)
+    return {
+        "ok": True,
+        "apply": True,
+        "autobind": bound,
+        "dirty": bool(scan.get("dirty")),
+        "reported": list(scan.get("reported") or []),
+        "active_packet": bound["active_packet"],
+        "write_set": list(bound["write_set"]),
+        "minted_permit": False,
+    }
 
 
 def write_set_covers_path(rel: str, write_set: tuple[str, ...]) -> bool:

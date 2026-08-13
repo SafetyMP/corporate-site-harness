@@ -268,18 +268,20 @@ def test_cli_route_model_and_attest(tmp_path: Path) -> None:
 
 
 def test_cli_usage_record_requires_user(tmp_path: Path) -> None:
+    # ACC-TPC-LEGAL-003: invoice/usage refuses --actor user (reserved for
+    # FA / user_approval / recover-chain). Non-user actors may still record.
     root = tmp_path / "corp"
     site = tmp_path / "site"
     root.mkdir()
     site.mkdir()
     Program.create("usage-pilot", site, program_root=root).save(root / "program.json")
-    with pytest.raises(ContractError, match="--actor user"):
+    with pytest.raises(ContractError, match="refuses --actor user"):
         dispatch(
             _ns(
                 command="usage",
                 usage_command="record",
                 root=root,
-                actor="coo",
+                actor="user",
                 amount_usd=10.0,
                 source="invoice",
                 note="",
@@ -291,7 +293,7 @@ def test_cli_usage_record_requires_user(tmp_path: Path) -> None:
             command="usage",
             usage_command="record",
             root=root,
-            actor="user",
+            actor="coo",
             amount_usd=1500.0,
             source="cursor-invoice",
             note="sol",

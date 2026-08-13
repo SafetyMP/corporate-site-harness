@@ -1,16 +1,20 @@
-"""Three-plane control: ACC-TPC plane/court/magnet (WP-TPC-001)."""
+"""Three-plane control: ACC-TPC plane/court/magnet/legal (WP-TPC-001/002)."""
 
 from __future__ import annotations
 
 import inspect
+import json
+import os
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
 from corp_harness import runtime_engine as tre
+from corp_harness.cli import main
 from corp_harness.contracts import ContractError
-from corp_harness.model import Program, digest_path
+from corp_harness.execution_policy import validate_packet_attestation
+from corp_harness.model import USER_GATED_ARTIFACTS, Program, digest_path
 
 
 @pytest.fixture(autouse=True)
@@ -226,4 +230,216 @@ def test_TPC_SEC_MAGNET_001_bits_audit_only_not_routing(tmp_path: Path) -> None:
     with pytest.raises(ContractError, match="unknown magnet cheat bit"):
         tre.append_magnet_cheat_bit(
             root, bit="intern_to_principal", program_digest=digest
+        )
+
+
+def _write(path: Path, value: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(value, encoding="utf-8")
+    return path
+
+
+def _record_factory_auth(
+    program: Program, root: Path, factory: Path, surfaces: list[str]
+) -> None:
+    master = _write(root / "master-spec.md", "# master\n")
+    program.record_artifact("master_spec", master, "ceo", root)
+    auth = _write(
+        root / "factory-authorization.json",
+        json.dumps(
+            {
+                "schema": "corporate-site-factory-authorization/v1",
+                "authorized": True,
+                "granted_by": "user",
+                "granted_at": "2026-08-12T00:00:00Z",
+                "program_id": program.program_id,
+                "revision": 1,
+                "master_spec_sha256": program.artifacts["master_spec"].sha256,
+                "factory_root": str(factory.resolve()),
+                "authorized_surfaces": surfaces,
+            }
+        )
+        + "\n",
+    )
+    program.record_artifact("factory_authorization", auth, "user", root)
+    program.save(root / "program.json")
+
+
+def _sealed_legal_packet(**overrides: object) -> dict:
+    packet = {
+        "role": "site-specialist",
+        "packet_id": "WP-TPC-002",
+        "root": "/tmp/factory",
+        "write_set": ["src/corp_harness/evidence.py"],
+        "routed_model": "composer-2.5",
+        "success_schema": "pytest exit 0",
+        "halt_conditions": ["Would pass --actor user"],
+        "model_id": "composer-2.5",
+        "model_class": "standard",
+        "task_class": "packet_implement",
+        "max_mode": False,
+    }
+    packet.update(overrides)
+    return packet
+
+
+def test_TPC_LEGAL_001_apply_autobind_without_mint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Apply auto-binds ACTIVE_PACKET; no separate mint; no manual export."""
+    factory, root, _ = _minimal_program(tmp_path)
+    program = Program.load(root / "program.json")
+    _record_factory_auth(program, root, factory, ["src/corp_harness", "tests"])
+    tre.bind_program_root(factory, root)
+    monkeypatch.setenv(tre.PROGRAM_ROOT_ENV, str(root))
+    monkeypatch.delenv(tre.ACTIVE_PACKET_ENV, raising=False)
+
+    target = factory / "src" / "corp_harness" / "evidence.py"
+    target.write_text("# baseline\n", encoding="utf-8")
+    tre.update_surface_baseline(root, factory_root=factory)
+    target.write_text("# packet-edit\n", encoding="utf-8")
+
+    with pytest.raises(ContractError, match="unsigned or preToolUse"):
+        tre.run_deferred_dirty_scan(
+            root, factory_root=factory, program=program, force=True
+        )
+
+    assert tre.ACTIVE_PACKET_ENV not in os.environ
+    assert not (root / "trust-mutation-permit.json").exists()
+
+    packet = _sealed_legal_packet(root=str(factory))
+    assert validate_packet_attestation(packet)["ok"] is True
+    # Packet file lives outside the corporate root so creating it is not OOB.
+    packet_path = tmp_path / "packet-WP-TPC-002.json"
+    _write(packet_path, json.dumps(packet) + "\n")
+
+    code = main(["apply", "--root", str(root), "--packet", str(packet_path)])
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert payload["ok"] is True
+    assert payload["apply"] is True
+    assert payload["minted_permit"] is False
+    assert payload["active_packet"] == str(packet_path.resolve())
+    assert "src/corp_harness/evidence.py" in payload["write_set"]
+    assert os.environ.get(tre.ACTIVE_PACKET_ENV) == str(packet_path.resolve())
+    assert not (root / "trust-mutation-permit.json").exists()
+
+    # Covered dirt accepted; force scan stays clean afterward.
+    clean = tre.run_deferred_dirty_scan(
+        root, factory_root=factory, program=Program.load(root / "program.json"), force=True
+    )
+    assert clean["ok"] is True
+    assert [
+        item
+        for item in clean["reported"]
+        if item.get("theater_signal_id") == "out_of_band_mutation"
+    ] == []
+
+
+def test_TPC_LEGAL_001_legal_next_no_gap_then_omits_mint() -> None:
+    """WP-TPC-002 transitional: mint AND apply both present (WP-TPC-006 cuts mint)."""
+    legal = tre.LEGAL_NEXT_COMMANDS
+    assert "corp-harness mint-mutation-permit" in legal
+    assert "corp-harness apply" in legal
+    assert legal.index("corp-harness mint-mutation-permit") < legal.index(
+        "corp-harness apply"
+    )
+    # No gap: both ceremony paths are named legal next this packet.
+    assert {"corp-harness mint-mutation-permit", "corp-harness apply"}.issubset(
+        set(legal)
+    )
+
+
+def test_TPC_LEGAL_001_stereotyped_deny_includes_apply_after_autobind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    factory, root, _ = _minimal_program(tmp_path)
+    tre.bind_program_root(factory, root)
+    monkeypatch.setenv(tre.PROGRAM_ROOT_ENV, str(root))
+    packet = _sealed_legal_packet(root=str(factory))
+    packet_path = root / "sealed-packet.json"
+    _write(packet_path, json.dumps(packet) + "\n")
+    tre.auto_bind_active_packet(root, packet_path)
+    assert os.environ.get(tre.ACTIVE_PACKET_ENV)
+
+    decision = tre.evaluate_pretooluse(
+        factory,
+        root,
+        {
+            "tool_name": "Write",
+            "tool_input": {"path": str(root / "program.json")},
+        },
+    )
+    assert decision["permission"] == "deny"
+    legal = decision.get("legal_next") or []
+    assert "corp-harness apply" in legal
+    assert "corp-harness mint-mutation-permit" in legal
+    assert "corp-harness apply" in decision["user_message"]
+    assert "corp-harness apply" in decision["agent_message"]
+    assert decision["halt_report"]["verdict"] == "halt_report"
+
+
+def test_TPC_LEGAL_003_clean_status_non_event(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _, root, factory = _minimal_program(tmp_path)
+    tre.bind_program_root(factory, root)
+    tre.update_surface_baseline(root, factory_root=factory)
+    digest = digest_path(root / "program.json")
+    tre.emit_and_apply(
+        root, kind="strict_success", program_digest=digest, event_id="legal3-seed"
+    )
+    tre.update_surface_baseline(root, factory_root=factory)
+    before_log = (root / "trust-event-log.jsonl").read_text(encoding="utf-8")
+    before_state = (root / "trust-state.json").read_text(encoding="utf-8")
+    assert main(["status", "--root", str(root)]) in {0, 1}
+    capsys.readouterr()
+    assert (root / "trust-event-log.jsonl").read_text(encoding="utf-8") == before_log
+    assert (root / "trust-state.json").read_text(encoding="utf-8") == before_state
+
+
+def test_TPC_LEGAL_003_actor_user_scoped_fa_approval_recover_only(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert "factory_authorization" in USER_GATED_ARTIFACTS
+    assert "user_approval" in USER_GATED_ARTIFACTS
+    _, root, _ = _minimal_program(tmp_path)
+
+    # Invoice/usage-style: --actor user refused.
+    code = main(
+        [
+            "usage",
+            "record",
+            "--root",
+            str(root),
+            "--actor",
+            "user",
+            "--amount-usd",
+            "1.0",
+            "--source",
+            "invoice",
+            "--apply",
+        ]
+    )
+    usage_payload = json.loads(capsys.readouterr().out)
+    assert code == 3
+    assert usage_payload["ok"] is False
+    assert "refuses --actor user" in str(usage_payload.get("error") or "")
+
+    # recover-chain still requires --actor user.
+    code = main(
+        ["trust", "recover-chain", "--root", str(root), "--actor", "ceo", "--apply"]
+    )
+    recover_payload = json.loads(capsys.readouterr().out)
+    assert code == 3
+    assert recover_payload["ok"] is False
+    assert "requires --actor user" in str(recover_payload.get("error") or "")
+
+    # FA / approval remain user-gated at the model layer.
+    with pytest.raises(ContractError, match="must be produced by user"):
+        Program.load(root / "program.json").record_artifact(
+            "factory_authorization",
+            _write(root / "factory-authorization.json", "{}\n"),
+            "ceo",
+            root,
         )
