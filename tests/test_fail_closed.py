@@ -18,6 +18,7 @@ from corp_harness.contracts import (
     VERIFICATION_SCRIPTS_OPTIONAL,
     VERIFICATION_SCRIPTS_REQUIRED,
 )
+from corp_harness.evidence import SAFE_ENV_KEYS, run_evidence
 from corp_harness.execution_policy import (
     DENIAL_BUDGET_HARD,
     DENIAL_CHILD_PROSE_EVIDENCE,
@@ -943,5 +944,73 @@ def test_FC_SEC_HALT_001_unbind_sibling_or_weaken_approval_halt_report(
     assert "corporate_acceptance" not in Program.load(program_a / "program.json").gates
     assert GATE_EXECUTION["adversary"][1] == ["./scripts/harness/adversarial.sh"]
     assert GATE_EXECUTION["site_verify"][1] == ["./scripts/harness/verify.sh"]
+
+
+def test_FC_EVIDENCE_001_run_evidence_forwards_program_root_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert tre.PROGRAM_ROOT_ENV in SAFE_ENV_KEYS
+    factory, program_a, sibling = _two_factory_programs(tmp_path)
+    tre.bind_program_root(factory, sibling)
+    marker_before = (factory / tre.PROGRAM_ROOT_MARKER).read_text(encoding="utf-8")
+    monkeypatch.setenv(tre.PROGRAM_ROOT_ENV, str(program_a))
+    script = factory / "echo-root.sh"
+    script.write_text(
+        "#!/bin/sh\nprintf '%s\\n' \"$CORP_HARNESS_PROGRAM_ROOT\"\n",
+        encoding="utf-8",
+    )
+    os.chmod(script, 0o755)
+    result = run_evidence("verify", ["./echo-root.sh"], factory, factory, 10)
+    assert result.passed
+    assert result.stdout.strip() == str(program_a)
+    assert (factory / tre.PROGRAM_ROOT_MARKER).read_text(encoding="utf-8") == marker_before
+
+
+def test_FC_SCAN_002_write_set_covers_force_apply_factory_edit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    factory, program_a, _sibling = _two_factory_programs(tmp_path)
+    program = Program.load(program_a / "program.json")
+    _record_factory_auth(
+        program, program_a, factory, ["src/corp_harness", "tests"]
+    )
+    tre.bind_program_root(factory, program_a)
+    monkeypatch.setenv(tre.PROGRAM_ROOT_ENV, str(program_a))
+    target = factory / "src" / "corp_harness" / "evidence.py"
+    target.write_text("# baseline\n", encoding="utf-8")
+    tre.update_surface_baseline(program_a, factory_root=factory)
+    target.write_text("# packet\n", encoding="utf-8")
+    with pytest.raises(ContractError, match="unsigned or preToolUse"):
+        tre.run_deferred_dirty_scan(
+            program_a, factory_root=factory, program=program, force=True
+        )
+
+    covered_root = tmp_path / "covered"
+    covered_root.mkdir()
+    factory_b, program_b_root, _sib = _two_factory_programs(covered_root)
+    program_b = Program.load(program_b_root / "program.json")
+    _record_factory_auth(
+        program_b, program_b_root, factory_b, ["src/corp_harness", "tests"]
+    )
+    tre.bind_program_root(factory_b, program_b_root)
+    monkeypatch.setenv(tre.PROGRAM_ROOT_ENV, str(program_b_root))
+    covered = factory_b / "src" / "corp_harness" / "evidence.py"
+    covered.write_text("# baseline\n", encoding="utf-8")
+    tre.update_surface_baseline(program_b_root, factory_root=factory_b)
+    covered.write_text("# packet\n", encoding="utf-8")
+    (program_b_root / tre.ACTIVE_WRITE_SET_FILE).write_text(
+        json.dumps({"write_set": ["src/corp_harness/evidence.py"]}) + "\n",
+        encoding="utf-8",
+    )
+    result = tre.run_deferred_dirty_scan(
+        program_b_root, factory_root=factory_b, program=program_b, force=True
+    )
+    assert result["skipped"] is False
+    oob = [
+        item
+        for item in result["reported"]
+        if item.get("theater_signal_id") == "out_of_band_mutation"
+    ]
+    assert oob == []
 
 

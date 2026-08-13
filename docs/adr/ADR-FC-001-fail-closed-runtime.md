@@ -32,6 +32,10 @@ wipe, or re-point it. Agents never pass `--actor user`. No `trust set-score`.
    - `WP-FC-002` — Sealed work orders + subcontractor ceilings (premium orthogonal)
    - `WP-FC-003` — Trust telemetry + locked mandates + no process-error cheat
    - `WP-FC-005` — Split-context + collusion/no-rehire + halt unbind + oracle binding
+   - `WP-FC-007` — Forward `CORP_HARNESS_PROGRAM_ROOT` through `run_evidence` /
+     `check --run` without rewriting the sibling marker; record SITE_VERIFICATION
+     artifacts (`adr:*`, implementation, verification, verification_scripts,
+     runtime_manifest)
 
 2. **Before-write deny (FC-01):** `preToolUse` (or equivalent) denies writes to
    protected corporate and factory surfaces unless a non-expired mutation permit
@@ -60,7 +64,10 @@ wipe, or re-point it. Agents never pass `--actor user`. No `trust set-score`.
    overrides marker when valid. Dirty/OOB scan scopes to active program +
    authorized surfaces + write-set/permits. Exclude `__pycache__/`, `*.pyc`,
    `.build/`, sibling corporate dirt alone. `wrong_root_operation` on mutating
-   mismatch.
+   mismatch. `run_evidence` / `check --run` MUST forward
+   `CORP_HARNESS_PROGRAM_ROOT` into the oracle subprocess so formal evidence
+   binds the env-selected program; it MUST NOT rewrite
+   `.corp-harness-program-root`.
 
 7. **Exclusive append + user recover (FC-09 / FC-11):** Log append shares the
    same exclusive critical-section discipline as trust-state writes (read tip +

@@ -2377,9 +2377,10 @@ def detect_dirty_surfaces(
 ) -> list[dict[str, str]]:
     """Compare protected digests to baseline; optionally honor mutation permits.
 
-    Mutating apply (honor_mutation_permits=False) still honors permits for
-    newly created artifact files, but will not launder pre-existing baseline
-    mutations (ACC-FC-DENY-002).
+    Mutating apply (honor_mutation_permits=False) still honors an active sealed
+    write_set, and honors permits for newly created artifact files, but will not
+    launder pre-existing baseline mutations outside that write_set
+    (ACC-FC-DENY-002).
     """
     root = program_root.expanduser().resolve()
     findings = detect_false_genesis_signals(root)
@@ -2391,6 +2392,8 @@ def detect_dirty_surfaces(
     current_corporate = collect_corporate_protected_digests(root)
 
     def _permitted(rel: str, *, mutation: bool) -> bool:
+        if write_set_covers_path(rel, load_active_write_set(root)):
+            return True
         if mutation and not honor_mutation_permits:
             return False
         return honor_permits and authorize_paths_with_permit(

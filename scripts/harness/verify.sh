@@ -33,6 +33,8 @@ REQUIRED_FC_TESTS=(
   test_FC_COL_002_producer_cannot_record_own_gate
   test_FC_COL_003_voided_actor_no_rehire_until_user
   test_FC_SEC_HALT_001_unbind_sibling_or_weaken_approval_halt_report
+  test_FC_EVIDENCE_001_run_evidence_forwards_program_root_env
+  test_FC_SCAN_002_write_set_covers_force_apply_factory_edit
 )
 
 # ADR-TR-003 / G-TR-AH-CORE + G-TR-AH-BYPASS (WP-TR-AH-C).
