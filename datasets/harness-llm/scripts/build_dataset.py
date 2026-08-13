@@ -514,34 +514,6 @@ def _policy_controlled(split: str) -> list[dict[str, Any]]:
     for task_type, difficulty, user, assistant, tags, must in more:
         items.append((task_type, difficulty, user, assistant, tags, must, None))
 
-    # Pad to target counts with numbered scenario variants
-    pad_templates = [
-        (
-            "decision",
-            "medium",
-            "Program revision={rev}. Artifacts changed after operations PASS. Advance?",
-            "No. Digests are stale; re-run check --run and record a fresh gate before corp-harness next.",
-            ["stale", "rev"],
-            ["No", "check --run", "stale"],
-        ),
-        (
-            "qa",
-            "easy",
-            "In revision {rev}, where is acceptance.json stored?",
-            "As a corporate-root artifact registered in program.json, not in the site tree.",
-            ["acceptance"],
-            ["corporate", "program.json"],
-        ),
-        (
-            "qa",
-            "medium",
-            "Revision {rev}: who prepares final-dossier.md?",
-            "corporate-ceo (actor ceo) after adversary evidence is current.",
-            ["dossier"],
-            ["ceo", "adversary"],
-        ),
-    ]
-
     target = TARGETS[split]["policy"]
     # First materialize unique items
     for task_type, difficulty, user, assistant, tags, must, g_over in items:

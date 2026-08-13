@@ -22,7 +22,7 @@ def test_archive_round_trip(tmp_path: Path) -> None:
     source.mkdir()
     (source / "config").mkdir()
     (source / "config/settings.json").write_text('{"enabled":true}\n')
-    os.chmod(source / "config/settings.json", 0o444)
+    os.chmod(source / "config/settings.json", 0o400)
     destination = tmp_path / "archive"
 
     manifest = create_archive(source, ["config"], destination, apply=True)
@@ -33,7 +33,7 @@ def test_archive_round_trip(tmp_path: Path) -> None:
     assert manifest["restore_verified"] is True
     assert verification["verified"] is True
     assert (restored / "config/settings.json").read_text() == '{"enabled":true}\n'
-    assert oct((restored / "config/settings.json").stat().st_mode & 0o777) == "0o444"
+    assert oct((restored / "config/settings.json").stat().st_mode & 0o777) == "0o400"
     assert oct(destination.stat().st_mode & 0o777) == "0o700"
     assert json.loads((destination / "ARCHIVE.OK").read_text())["restore_verified"] is True
 

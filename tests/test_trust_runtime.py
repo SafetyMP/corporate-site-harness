@@ -573,7 +573,7 @@ def test_TR_D6_004_heavy_empty_stdout_gov_required(
 
     stub = tmp_path / "empty-stdout-gov"
     stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    stub.chmod(0o755)
+    stub.chmod(0o700)
     monkeypatch.setenv("CORP_GOV_CHECK", str(stub))
     _, root, _ = _minimal_program(tmp_path)
     payload, code = run_gov_command(
@@ -2100,7 +2100,7 @@ def test_TRR_002_heavy_oserror_gov_required(
     """Direct heavy run_gov_command OSError → GOV_REQUIRED (closes ADV-TR-001)."""
     stub = tmp_path / "corp-gov-check-stub"
     stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    stub.chmod(0o755)
+    stub.chmod(0o700)
     monkeypatch.setenv("CORP_GOV_CHECK", str(stub))
 
     def _boom(*_a: object, **_k: object) -> object:
@@ -2125,7 +2125,7 @@ def test_TRR_002b_assist_oserror_sg03_preserved(
     """Assist-command OSError remains SG-03 / GOV_ASSIST_UNAVAILABLE."""
     stub = tmp_path / "corp-gov-check-stub"
     stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    stub.chmod(0o755)
+    stub.chmod(0o700)
     monkeypatch.setenv("CORP_GOV_CHECK", str(stub))
 
     def _boom(*_a: object, **_k: object) -> object:

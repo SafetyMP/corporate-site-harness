@@ -13,7 +13,7 @@ from corp_harness.model import ContractError
 def script(tmp_path: Path, name: str, body: str) -> Path:
     path = tmp_path / name
     path.write_text("#!/bin/sh\nset -eu\n" + body, encoding="utf-8")
-    os.chmod(path, 0o755)
+    os.chmod(path, 0o700)
     return path
 
 
