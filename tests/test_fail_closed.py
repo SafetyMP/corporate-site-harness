@@ -881,6 +881,7 @@ def test_FC_COL_002_producer_cannot_record_own_gate(tmp_path: Path) -> None:
 
 
 def test_FC_COL_003_voided_actor_no_rehire_until_user(tmp_path: Path) -> None:
+    """TPC-CUT-006: career ledger ignored for route-model; session/self-record still deny."""
     _factory, program_a, _sibling = _two_factory_programs(tmp_path)
     tre.void_involved_packets(
         program_a,
@@ -894,40 +895,51 @@ def test_FC_COL_003_voided_actor_no_rehire_until_user(tmp_path: Path) -> None:
         actor_ids=["banned-actor"],
         session_ids=["banned-session"],
     )
-    denied = route_model(
+    assert tre.is_voided_actor(program_a, actor_id="banned-actor")
+    allowed = route_model(
         role="site-specialist",
         task_class="packet_implement",
         packet=_sealed_packet(
             actor_id="banned-actor",
+            session_id="banned-session",
             corporate_root=str(program_a),
         ),
     )
-    assert denied["ok"] is False
-    assert denied["denial_code"] == DENIAL_VOIDED_ACTOR
+    assert allowed["ok"] is True
+    assert allowed.get("denial_code") != DENIAL_VOIDED_ACTOR
+
+    # Reinstate remains user-gated audit API (not a route control).
     with pytest.raises(ContractError, match="unauthorized_actor"):
         tre.reinstate_voided_actor(
             program_a, actor="site-specialist", actor_id="banned-actor"
         )
     tre.reinstate_voided_actor(program_a, actor="user", actor_id="banned-actor")
     assert not tre.is_voided_actor(program_a, actor_id="banned-actor")
-    still = route_model(
-        role="site-specialist",
-        task_class="packet_implement",
-        packet=_sealed_packet(
-            session_id="banned-session",
-            corporate_root=str(program_a),
-        ),
+
+    same = _sealed_packet(
+        role="operations-excellence",
+        task_class="independent_review",
+        packet_id="WP-FC-VOID-REV",
+        task_id="session-producer",
+        session_id="session-producer",
+        producer_session_id="session-producer",
+        model_id="cursor-grok-4.5-high-fast",
+        model_class="fast",
     )
-    assert still["denial_code"] == DENIAL_VOIDED_ACTOR
-    tre.reinstate_voided_actor(
-        program_a, actor="user", session_id="banned-session"
-    )
-    ok = route_model(
-        role="site-specialist",
-        task_class="packet_implement",
-        packet=_sealed_packet(corporate_root=str(program_a)),
-    )
-    assert ok["ok"] is True
+    with pytest.raises(ContractError, match="NEW Task"):
+        validate_reviewer_launch(same, producer_session_id="session-producer")
+    attested = validate_packet_attestation(same)
+    assert attested["ok"] is False
+    assert attested["denial_code"] == DENIAL_SAME_SESSION_REVIEWER
+
+    program = Program.load(program_a / "program.json")
+    auth = _write(program_a / "factory-authorization.json", "{}\n")
+    with pytest.raises(ContractError, match="must be produced by user"):
+        program.record_artifact(
+            "factory_authorization", auth, "site-specialist", program_a
+        )
+    with pytest.raises(ContractError, match="must be produced by user"):
+        program.record_artifact("user_approval", auth, "ceo", program_a)
 
 
 def test_FC_SEC_HALT_001_unbind_sibling_or_weaken_approval_halt_report(

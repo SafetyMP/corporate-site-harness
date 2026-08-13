@@ -47,8 +47,12 @@ audit-only. No set-score / wipe-rebind amnesty. Process-error skip is not
 enabled. Do not reopen fail-closed-runtime r1.
 
 Reviewers launch as a new Task (prompt = packet id + digests + oracle only).
-Covering a skipped gate voids involved packets; voided actor/session cannot
-be redispatched until the user reinstates. Halt/dispatch matches only boolean
+Covering a skipped gate voids involved packets (audit ledger may record
+actors); the voided-actor/no-rehire ledger is not an allow/deny or route-model
+control. Same-session reviewer refuse and producer-cannot-self-record still
+refuse. After preToolUse deny, legal next is
+`corp-harness apply|status|route-model|check` (or `halt_report`);
+`mint-mutation-permit` is not required. Halt/dispatch matches only boolean
 flags `unbind_sibling`, `skip_adversary`, `skip_user_approval`,
 `weaken_adversary`, `weaken_user_approval` (never `halt_conditions` prose);
 flag true ⇒ `halt_report`. Attest evidence is only `check --attest-packet`

@@ -11,7 +11,6 @@ from corp_harness.model import ContractError
 from corp_harness.runtime_engine import (
     build_halt_report,
     halt_unbind_or_weaken_approval,
-    is_voided_actor,
 )
 
 POLICY_SCHEMA = "corporate-site-execution-policy/v1"
@@ -559,33 +558,7 @@ def route_model(
             "denial_code": None,
         }
 
-    void_root = None
-    if packet:
-        raw_root = packet.get("corporate_root") or packet.get("program_root")
-        if isinstance(raw_root, str) and raw_root.strip():
-            void_root = Path(raw_root)
-        actor_id = packet.get("actor_id")
-        session_id = packet.get("session_id")
-        if void_root is not None and is_voided_actor(
-            void_root,
-            actor_id=str(actor_id) if actor_id else None,
-            session_id=str(session_id) if session_id else None,
-        ):
-            return {
-                "ok": False,
-                "role": role.strip(),
-                "task_class": task_class,
-                "model_class": "standard",
-                "allowed_model_ids": [],
-                "requires_escalation": False,
-                "max_mode_allowed": False,
-                "verdict": "halt_report",
-                "reasons": [
-                    "voided actor_id/session_id cannot be redispatched until user reinstate"
-                ],
-                "denial_code": DENIAL_VOIDED_ACTOR,
-            }
-
+    # Voided-actor / no-rehire ledger is audit-only (TPC-CUT-006); not a route control.
     ceiling_reasons = _subcontractor_ceiling_reasons(packet, resolved)
     if ceiling_reasons:
         halt = build_halt_report(

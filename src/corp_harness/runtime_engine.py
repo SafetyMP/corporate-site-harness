@@ -39,10 +39,8 @@ VOIDED_ACTORS_FILE = "trust-voided-actors.json"
 VOIDED_ACTORS_SCHEMA = "corporate-site-voided-actors/v1"
 THREE_PLANE_NAMES = ("capability", "evidence", "spend")
 MAGNET_CHEAT_BITS = frozenset({"hook_write", "actor_skip", "self_approval"})
-# Transitional (WP-TPC-002): mint and apply both legal next — no gap.
-# WP-TPC-006 removes mint after auto-bind is the sole path.
+# Apply auto-bind is the legal write path (WP-TPC-002/006). Mint is not legal next.
 LEGAL_NEXT_COMMANDS = (
-    "corp-harness mint-mutation-permit",
     "corp-harness apply",
     "corp-harness status",
     "corp-harness route-model",
@@ -648,7 +646,8 @@ def load_trust_state(program_root: Path, *, program_json: Path | None = None) ->
     must not append `digest_rebind`.
 
     Post-log / post-anchor state deletion must not synthesize 1.0/light
-    (false genesis → fail-closed 0.0 heavy until report-event applies).
+    (false genesis → fail-closed 0.0 heavy telemetry). report-event is optional
+    anti-harness telemetry, not a required unlock for legal apply after auto-bind.
     """
     root = program_root.expanduser().resolve()
     program_path = (program_json or (root / "program.json")).expanduser().resolve()
@@ -2558,15 +2557,9 @@ def detect_false_genesis_signals(program_root: Path) -> list[dict[str, str]]:
                     "protected_path": "trust-event-log.jsonl",
                 }
             )
-    state = load_trust_state(root)
-    if state.false_genesis:
-        findings.append(
-            {
-                "theater_signal_id": "out_of_band_mutation",
-                "reason": "false genesis: refuse synthesize 1.0 after log/anchor evidence",
-                "protected_path": "trust-state.json",
-            }
-        )
+    # false_genesis remains load-visible score telemetry (0.0 heavy). Dual-wipe
+    # signals above stay anti-harness findings. report-event is not required to
+    # unlock legal apply after auto-bind (TPC-CUT-003 / ACC-TPC-COURT-003).
     return findings
 
 

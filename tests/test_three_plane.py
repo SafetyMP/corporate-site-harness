@@ -19,6 +19,8 @@ from corp_harness.evidence_validation import admit_attest_evidence
 from corp_harness.execution_policy import (
     DEFAULT_MODEL_ALIASES,
     DENIAL_PREMIUM_MODEL_POLICY,
+    DENIAL_SAME_SESSION_REVIEWER,
+    DENIAL_VOIDED_ACTOR,
     ESCALATION_SCHEMA,
     attest_model_use,
     check_evidence_age,
@@ -29,6 +31,7 @@ from corp_harness.execution_policy import (
     route_model,
     site_manager_after_packet_outcome,
     validate_packet_attestation,
+    validate_reviewer_launch,
     validate_reviewer_prompt,
     validate_role_success_schema,
 )
@@ -355,17 +358,18 @@ def test_TPC_LEGAL_001_apply_autobind_without_mint(
 
 
 def test_TPC_LEGAL_001_legal_next_no_gap_then_omits_mint() -> None:
-    """WP-TPC-002 transitional: mint AND apply both present (WP-TPC-006 cuts mint)."""
+    """WP-TPC-006: LEGAL_NEXT omits mint and keeps apply (no empty legal next)."""
     legal = tre.LEGAL_NEXT_COMMANDS
-    assert "corp-harness mint-mutation-permit" in legal
+    assert legal
     assert "corp-harness apply" in legal
-    assert legal.index("corp-harness mint-mutation-permit") < legal.index(
-        "corp-harness apply"
-    )
-    # No gap: both ceremony paths are named legal next this packet.
-    assert {"corp-harness mint-mutation-permit", "corp-harness apply"}.issubset(
-        set(legal)
-    )
+    assert "corp-harness mint-mutation-permit" not in legal
+    expected = {
+        "corp-harness apply",
+        "corp-harness status",
+        "corp-harness route-model",
+        "corp-harness check",
+    }
+    assert expected.issubset(set(legal))
 
 
 def test_TPC_LEGAL_001_stereotyped_deny_includes_apply_after_autobind(
@@ -391,10 +395,215 @@ def test_TPC_LEGAL_001_stereotyped_deny_includes_apply_after_autobind(
     assert decision["permission"] == "deny"
     legal = decision.get("legal_next") or []
     assert "corp-harness apply" in legal
-    assert "corp-harness mint-mutation-permit" in legal
+    assert "corp-harness mint-mutation-permit" not in legal
     assert "corp-harness apply" in decision["user_message"]
     assert "corp-harness apply" in decision["agent_message"]
+    assert "mint-mutation-permit" not in decision["user_message"]
+    assert "mint-mutation-permit" not in decision["agent_message"]
     assert decision["halt_report"]["verdict"] == "halt_report"
+
+
+def _prepare_ca_artifacts(program: Program, root: Path, factory: Path) -> None:
+    """Record master_spec/acceptance/FA so DESIGN→CORPORATE_ACCEPTANCE is legal."""
+    _record_factory_auth(program, root, factory, ["src/corp_harness", "tests"])
+    acceptance = _write(
+        root / "acceptance.json",
+        json.dumps({"schema": "corporate-site-acceptance/v1", "ok": True}) + "\n",
+    )
+    program.record_artifact("acceptance", acceptance, "ceo", root)
+    program.save(root / "program.json")
+
+
+def test_TPC_COURT_003_status_record_next_without_d8_or_report_event(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """ACC-TPC-COURT-003: no baseline/D8/report-event control for status/record/next/apply."""
+    factory, root, _ = _minimal_program(tmp_path)
+    program = Program.load(root / "program.json")
+    tre.bind_program_root(factory, root, seed_baseline=False)
+    monkeypatch.setenv(tre.PROGRAM_ROOT_ENV, str(root))
+    baseline = root / "trust-surface-baseline.json"
+    if baseline.is_file():
+        baseline.unlink()
+    assert not baseline.exists()
+    assert not (root / "trust-event-log.jsonl").exists()
+
+    code = main(["status", "--root", str(root)])
+    status_payload = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert status_payload["ok"] is True
+    assert "trust_score" in status_payload
+    assert not baseline.exists()
+
+    artifact = _write(root / "master-spec.md", "# master\n")
+    code = main(
+        [
+            "record",
+            "--root",
+            str(root),
+            "--artifact",
+            "master_spec",
+            "--path",
+            str(artifact),
+            "--actor",
+            "ceo",
+        ]
+    )
+    record_payload = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert record_payload["ok"] is True
+    assert record_payload["apply"] is False
+    assert tre.GOV_REQUIRED not in str(record_payload)
+
+    program = Program.load(root / "program.json")
+    _prepare_ca_artifacts(program, root, factory)
+    code = main(
+        [
+            "next",
+            "--root",
+            str(root),
+            "--to",
+            "CORPORATE_ACCEPTANCE",
+            "--actor",
+            "ceo",
+        ]
+    )
+    next_payload = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert next_payload["ok"] is True
+    assert next_payload["apply"] is False
+
+    # Apply is legal without a prior report-event unlock.
+    packet = _sealed_legal_packet(root=str(factory))
+    packet_path = tmp_path / "packet-court-003.json"
+    _write(packet_path, json.dumps(packet) + "\n")
+    code = main(["apply", "--root", str(root), "--packet", str(packet_path)])
+    apply_payload = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert apply_payload["ok"] is True
+    assert apply_payload["apply"] is True
+    assert apply_payload["minted_permit"] is False
+    assert not any(
+        "report-event" in str(item).lower()
+        for item in (apply_payload.get("reported") or [])
+    )
+
+
+def test_TPC_CUT_001_gov_optional_for_status_record_next(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """TPC-CUT-002: status/record/next succeed without corp-gov-check (never GOV_REQUIRED)."""
+    factory, root, _ = _minimal_program(tmp_path)
+    program = Program.load(root / "program.json")
+    tre.bind_program_root(factory, root, seed_baseline=False)
+    monkeypatch.setenv(tre.PROGRAM_ROOT_ENV, str(root))
+    monkeypatch.setenv("CORP_GOV_CHECK", str(tmp_path / "missing-corp-gov-check"))
+    monkeypatch.setattr(
+        "corp_harness.cli.find_corp_gov_check", lambda search_root=None: None
+    )
+    monkeypatch.setattr(
+        "corp_harness.swift_gov.find_corp_gov_check", lambda search_root=None: None
+    )
+
+    code = main(["status", "--root", str(root)])
+    status_out = capsys.readouterr().out
+    status_payload = json.loads(status_out)
+    assert code == 0
+    assert status_payload["ok"] is True
+    assert "GOV_REQUIRED" not in status_out
+
+    artifact = _write(root / "master-spec.md", "# master\n")
+    code = main(
+        [
+            "record",
+            "--root",
+            str(root),
+            "--artifact",
+            "master_spec",
+            "--path",
+            str(artifact),
+            "--actor",
+            "ceo",
+        ]
+    )
+    record_out = capsys.readouterr().out
+    record_payload = json.loads(record_out)
+    assert code == 0
+    assert record_payload["ok"] is True
+    assert "GOV_REQUIRED" not in record_out
+
+    program = Program.load(root / "program.json")
+    _prepare_ca_artifacts(program, root, factory)
+    code = main(
+        [
+            "next",
+            "--root",
+            str(root),
+            "--to",
+            "CORPORATE_ACCEPTANCE",
+            "--actor",
+            "ceo",
+        ]
+    )
+    next_out = capsys.readouterr().out
+    next_payload = json.loads(next_out)
+    assert code == 0
+    assert next_payload["ok"] is True
+    assert "GOV_REQUIRED" not in next_out
+
+
+def test_TPC_CUT_001_career_ledger_ignored_same_session_and_self_record_still_denied(
+    tmp_path: Path,
+) -> None:
+    """TPC-CUT-006: voided ledger ignored; same-session reviewer + self-record still deny."""
+    _factory, root, _ = _minimal_program(tmp_path)
+    tre.void_involved_packets(
+        root,
+        packets=[
+            {
+                "packet_id": "WP-TPC-006",
+                "actor_id": "banned-actor",
+                "session_id": "banned-session",
+            }
+        ],
+        actor_ids=["banned-actor"],
+        session_ids=["banned-session"],
+    )
+    assert tre.is_voided_actor(root, actor_id="banned-actor")
+    routed = route_model(
+        role="site-specialist",
+        task_class="packet_implement",
+        packet=_sealed_legal_packet(
+            actor_id="banned-actor",
+            session_id="banned-session",
+            corporate_root=str(root),
+        ),
+    )
+    assert routed["ok"] is True
+    assert routed.get("denial_code") != DENIAL_VOIDED_ACTOR
+
+    same = _sealed_legal_packet(
+        role="operations-excellence",
+        task_class="independent_review",
+        packet_id="WP-TPC-006-REV",
+        task_id="session-producer",
+        session_id="session-producer",
+        producer_session_id="session-producer",
+        model_id="cursor-grok-4.5-high-fast",
+        model_class="fast",
+    )
+    with pytest.raises(ContractError, match="NEW Task"):
+        validate_reviewer_launch(same, producer_session_id="session-producer")
+    attested = validate_packet_attestation(same)
+    assert attested["ok"] is False
+    assert attested["denial_code"] == DENIAL_SAME_SESSION_REVIEWER
+
+    program = Program.load(root / "program.json")
+    auth = _write(root / "factory-authorization.json", "{}\n")
+    with pytest.raises(ContractError, match="must be produced by user"):
+        program.record_artifact("factory_authorization", auth, "site-specialist", root)
+    with pytest.raises(ContractError, match="must be produced by user"):
+        program.record_artifact("user_approval", auth, "ceo", root)
 
 
 def test_TPC_LEGAL_003_clean_status_non_event(

@@ -268,7 +268,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     trust_parser = subparsers.add_parser(
         "trust",
-        help="trust-state helpers (log read-only; report-event sole anti-harness path)",
+        help="trust-state helpers (log read-only; report-event optional telemetry)",
     )
     trust_sub = trust_parser.add_subparsers(dest="trust_command", required=True)
     trust_log = trust_sub.add_parser(
@@ -289,7 +289,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     trust_report = trust_sub.add_parser(
         "report-event",
-        help="sole anti-harness report path → emit_and_apply deceptive_theater",
+        help="optional anti-harness telemetry → emit_and_apply deceptive_theater",
     )
     _root_argument(trust_report)
     trust_report.add_argument(
@@ -889,11 +889,13 @@ def _enforce_trust_route(
     *,
     factory_root: Path | None = None,
 ) -> None:
-    """Fail closed on broken trust log or missing corp-gov-check when required.
+    """Fail closed on broken trust log; FG-001 seals always-force by action name.
 
     Routing is action-name keyed (ADR-TPC-001 / ACC-TPC-PIPE-001): trust_score,
     light-heavy band, and bound-root MUST NOT select heavy_validate theater.
     FG-001 seals, adversary, user_approval, and digest binding are never skipped.
+    status/record/next do not call this path and must not require corp-gov-check
+    (TPC-CUT-002). Swift remains required only for action-routed heavy seals.
     """
     del factory_root  # bind state is not a heavy-force control (TPC-PIPE-001)
     require_verifiable_trust_log(program_root)
