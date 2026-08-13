@@ -14,7 +14,10 @@ from corp_harness.archive import (
 )
 from corp_harness.contracts import CORPORATE_ACCEPTANCE_ARGV
 from corp_harness.evidence import run_evidence, write_evidence
-from corp_harness.evidence_validation import resolve_check_evidence_roots
+from corp_harness.evidence_validation import (
+    ATTEST_EVIDENCE_SOURCE,
+    resolve_check_evidence_roots,
+)
 from corp_harness.execution_policy import (
     TASK_CLASSES,
     check_evidence_age,
@@ -663,6 +666,9 @@ def _check(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         packet = _load_json_object(args.attest_packet, label="attest-packet")
         attestation = validate_packet_attestation(packet, policy=policy)
         result["attestation"] = attestation
+        # Provenance stamp: only this CLI path is admissible attest evidence.
+        result["evidence_source"] = ATTEST_EVIDENCE_SOURCE
+        result["gate_evidence"] = bool(attestation.get("ok"))
         if not attestation.get("ok"):
             result["ok"] = False
             result["denial_code"] = attestation.get("denial_code")

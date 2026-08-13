@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from typing import Any
 
 from corp_harness.contracts import (
     CORPORATE_ACCEPTANCE_REQUIRE_EXECUTABLE_CURRENTNESS,
@@ -8,6 +10,89 @@ from corp_harness.contracts import (
     ContractError,
     assert_migration_currentness_invariant,
 )
+
+ATTEST_EVIDENCE_SOURCE = "corp-harness check --attest-packet"
+
+
+def admit_attest_evidence(
+    payload: dict[str, Any] | Path,
+    *,
+    path: Path | None = None,
+) -> dict[str, Any]:
+    """Admit attest evidence only when produced by ``check --attest-packet``.
+
+    Hand-written ``attest-*.json`` files (or equivalent payloads lacking the
+    CLI provenance stamp) are rejected as non-evidence (TPC-HALT-002).
+    """
+    source_path = path
+    data: dict[str, Any]
+    if isinstance(payload, Path):
+        source_path = payload
+        try:
+            loaded = json.loads(payload.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            return {
+                "admitted": False,
+                "ok": False,
+                "gate_evidence": False,
+                "error": f"unreadable attest evidence: {exc}",
+            }
+        if not isinstance(loaded, dict):
+            return {
+                "admitted": False,
+                "ok": False,
+                "gate_evidence": False,
+                "error": "attest evidence must be a JSON object",
+            }
+        data = loaded
+    elif isinstance(payload, dict):
+        data = payload
+    else:
+        return {
+            "admitted": False,
+            "ok": False,
+            "gate_evidence": False,
+            "error": "attest evidence must be an object",
+        }
+
+    source = data.get("evidence_source") or data.get("attestation_evidence_source")
+    if source != ATTEST_EVIDENCE_SOURCE:
+        name = source_path.name if isinstance(source_path, Path) else ""
+        handwritten = bool(name) and (
+            name.startswith("attest-")
+            or name.startswith("attest_")
+            or name.startswith("attest.")
+        )
+        return {
+            "admitted": False,
+            "ok": False,
+            "gate_evidence": False,
+            "error": (
+                "hand-written attest-*.json is not gate evidence; "
+                "use check --attest-packet"
+                if handwritten
+                else (
+                    "attest evidence requires "
+                    f"{ATTEST_EVIDENCE_SOURCE} provenance"
+                )
+            ),
+        }
+
+    attestation = data.get("attestation")
+    if not isinstance(attestation, dict) or not attestation.get("ok"):
+        return {
+            "admitted": False,
+            "ok": False,
+            "gate_evidence": False,
+            "error": "attestation not ok",
+        }
+    return {
+        "admitted": True,
+        "ok": True,
+        "gate_evidence": True,
+        "attestation": attestation,
+        "evidence_source": ATTEST_EVIDENCE_SOURCE,
+    }
 
 
 def executable_evidence_root(

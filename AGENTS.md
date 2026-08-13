@@ -48,6 +48,10 @@ enabled. Do not reopen fail-closed-runtime r1.
 
 Reviewers launch as a new Task (prompt = packet id + digests + oracle only).
 Covering a skipped gate voids involved packets; voided actor/session cannot
-be redispatched until the user reinstates. Unbind sibling or weaken
-adversary/user approval is `halt_report`. Oracle evidence is only
+be redispatched until the user reinstates. Halt/dispatch matches only boolean
+flags `unbind_sibling`, `skip_adversary`, `skip_user_approval`,
+`weaken_adversary`, `weaken_user_approval` (never `halt_conditions` prose);
+flag true ⇒ `halt_report`. Attest evidence is only `check --attest-packet`
+stdout (hand-written `attest-*.json` is non-evidence). `halt_report` is
+terminal success. Oracle evidence is only
 `scripts/harness/{verify,adversarial}.sh`.

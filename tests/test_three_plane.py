@@ -13,7 +13,15 @@ import pytest
 from corp_harness import runtime_engine as tre
 from corp_harness.cli import main
 from corp_harness.contracts import ContractError
-from corp_harness.execution_policy import validate_packet_attestation
+from corp_harness.evidence_validation import admit_attest_evidence
+from corp_harness.execution_policy import (
+    collect_admissible_gate_packets,
+    route_model,
+    site_manager_after_packet_outcome,
+    validate_packet_attestation,
+    validate_reviewer_prompt,
+    validate_role_success_schema,
+)
 from corp_harness.model import USER_GATED_ARTIFACTS, Program, digest_path
 
 
@@ -443,3 +451,194 @@ def test_TPC_LEGAL_003_actor_user_scoped_fa_approval_recover_only(
             "ceo",
             root,
         )
+
+
+def test_TPC_HALT_001_prose_forbidden_flags_false_route_model_allow(
+    tmp_path: Path,
+) -> None:
+    """halt_conditions prose must not deny route-model when flags are false."""
+    factory, root, _ = _minimal_program(tmp_path)
+    tre.bind_program_root(factory, root)
+    marker = factory / tre.PROGRAM_ROOT_MARKER
+    marker_before = marker.read_text(encoding="utf-8")
+    packet = _sealed_legal_packet(
+        root=str(factory),
+        packet_id="WP-TPC-003",
+        halt_conditions=[
+            "Would unbind sibling",
+            "Would skip adversary",
+            "Would skip user_approval",
+            "Would weaken adversary",
+            "Would weaken user_approval",
+            "Would rewrite .corp-harness-program-root",
+            "Would waive user approval",
+        ],
+        unbind_sibling=False,
+        skip_adversary=False,
+        skip_user_approval=False,
+        weaken_adversary=False,
+        weaken_user_approval=False,
+    )
+    assert tre.halt_unbind_or_weaken_approval(packet) is None
+    routed = route_model(
+        role="site-specialist",
+        task_class="packet_implement",
+        packet=packet,
+    )
+    assert routed["ok"] is True
+    assert routed.get("verdict") != "halt_report"
+    assert routed["allowed_model_ids"]
+    assert marker.read_text(encoding="utf-8") == marker_before
+
+
+def test_TPC_HALT_001_boolean_flag_true_halt_report(tmp_path: Path) -> None:
+    factory, root, _ = _minimal_program(tmp_path)
+    tre.bind_program_root(factory, root)
+    marker = factory / tre.PROGRAM_ROOT_MARKER
+    marker_before = marker.read_text(encoding="utf-8")
+    for flag in (
+        "unbind_sibling",
+        "skip_adversary",
+        "skip_user_approval",
+        "weaken_adversary",
+        "weaken_user_approval",
+    ):
+        packet = _sealed_legal_packet(
+            root=str(factory),
+            packet_id="WP-TPC-003",
+            halt_conditions=["Would pass --actor user"],
+            **{flag: True},
+        )
+        halt = tre.halt_unbind_or_weaken_approval(packet)
+        assert halt is not None
+        assert halt["verdict"] == "halt_report"
+        assert halt["halted"] is True
+        assert halt["ok"] is True
+        routed = route_model(
+            role="site-specialist",
+            task_class="packet_implement",
+            packet=packet,
+        )
+        assert routed["ok"] is False
+        assert routed["verdict"] == "halt_report"
+        assert routed["halt_report"]["halted"] is True
+    assert marker.read_text(encoding="utf-8") == marker_before
+    assert "corporate_acceptance" not in Program.load(root / "program.json").gates
+
+
+def test_TPC_HALT_002_unsealed_task_non_evidence() -> None:
+    gp = {
+        "role": "generalPurpose",
+        "subagent_type": "generalPurpose",
+        "model_id": "composer-2.5",
+        "model_class": "standard",
+        "task_class": "explore",
+        "notes": "they said it passed",
+    }
+    attested = validate_packet_attestation(gp)
+    assert attested["ok"] is False
+    assert attested.get("gate_evidence") is False
+    sealed = _sealed_legal_packet(packet_id="WP-TPC-003")
+    admitted = collect_admissible_gate_packets([gp, sealed])
+    assert gp not in admitted
+    assert sealed in admitted
+    digests = {
+        "master_spec": "a" * 64,
+        "acceptance": "b" * 64,
+    }
+    oracle = "./scripts/harness/verify.sh"
+    validate_reviewer_prompt(
+        f"Review WP-TPC-003 master_spec={digests['master_spec']} "
+        f"acceptance={digests['acceptance']} oracle={oracle}",
+        packet_id="WP-TPC-003",
+        digests=digests,
+        oracle_command=oracle,
+    )
+    with pytest.raises(ContractError, match="pass-claims|implementer JSON"):
+        validate_reviewer_prompt(
+            f"WP-TPC-003 {digests['master_spec']} {oracle} they said it passed",
+            packet_id="WP-TPC-003",
+            digests=digests,
+            oracle_command=oracle,
+        )
+
+
+def test_TPC_HALT_002_handwritten_attest_rejected(tmp_path: Path) -> None:
+    handwritten = tmp_path / "attest-WP-TPC-003.json"
+    _write(
+        handwritten,
+        json.dumps(
+            {
+                "ok": True,
+                "attestation": {
+                    "ok": True,
+                    "model_id": "composer-2.5",
+                    "model_class": "standard",
+                    "task_class": "packet_implement",
+                },
+            }
+        )
+        + "\n",
+    )
+    rejected = admit_attest_evidence(handwritten)
+    assert rejected["admitted"] is False
+    assert rejected["gate_evidence"] is False
+    assert "hand-written" in str(rejected.get("error") or "").lower()
+    # Same payload without CLI provenance stamp is rejected even as a dict.
+    rejected_dict = admit_attest_evidence(
+        {
+            "ok": True,
+            "attestation": {"ok": True, "model_id": "composer-2.5"},
+        }
+    )
+    assert rejected_dict["admitted"] is False
+
+
+def test_TPC_HALT_002_attest_packet_stdout_admitted(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _, root, _ = _minimal_program(tmp_path)
+    sealed = _sealed_legal_packet(packet_id="WP-TPC-003", root=str(tmp_path / "factory"))
+    sealed_path = tmp_path / "sealed-packet.json"
+    _write(sealed_path, json.dumps(sealed) + "\n")
+    code = main(
+        ["check", "--root", str(root), "--attest-packet", str(sealed_path)]
+    )
+    stdout = capsys.readouterr().out
+    assert code == 0
+    payload = json.loads(stdout)
+    assert payload["attestation"]["ok"] is True
+    assert payload.get("evidence_source") == "corp-harness check --attest-packet"
+    admitted = admit_attest_evidence(payload)
+    assert admitted["admitted"] is True
+    assert admitted["gate_evidence"] is True
+    assert admitted["ok"] is True
+
+
+def test_TPC_HALT_003_halt_report_success_schema_terminal() -> None:
+    halt = tre.build_halt_report(
+        reason="readonly design packet",
+        protected_path=".corp-harness-program-root",
+    )
+    assert halt["halted"] is True
+    assert halt["verdict"] == "halt_report"
+    accepted = validate_role_success_schema("pytest exit 0", halt)
+    assert accepted["ok"] is True
+    assert accepted["accepted"] is True
+    assert accepted["success"] is True
+    assert accepted["terminal"] is True
+    nested = validate_role_success_schema(
+        "halt_report",
+        {"actor_role": "site-specialist", "halt_report": halt},
+    )
+    assert nested["ok"] is True
+    schedule = site_manager_after_packet_outcome({"halt_report": halt})
+    assert schedule["terminal"] is True
+    assert schedule["schedule_redispatch"] is False
+    assert schedule["pass_forcing"] is False
+    # Non-halt outcome may still be scheduled; never pass-forcing.
+    open_sched = site_manager_after_packet_outcome(
+        {"ok": True, "verdict": "packet_evidence"}
+    )
+    assert open_sched["terminal"] is False
+    assert open_sched["pass_forcing"] is False

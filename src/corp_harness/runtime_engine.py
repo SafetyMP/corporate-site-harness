@@ -388,7 +388,12 @@ def apply_covered_skip_void(
 
 
 def halt_unbind_or_weaken_approval(packet: dict[str, Any]) -> dict[str, Any] | None:
-    """Halt-report success when a packet would unbind the sibling or weaken approval."""
+    """Halt when explicit boolean weaken/unbind flags are true (TPC-HALT-001).
+
+    Matches only ``unbind_sibling``, ``skip_adversary``, ``skip_user_approval``,
+    ``weaken_adversary``, and ``weaken_user_approval``. Never substring-matches
+    ``halt_conditions`` prose.
+    """
     if not isinstance(packet, dict):
         return None
     flags = (
@@ -398,21 +403,7 @@ def halt_unbind_or_weaken_approval(packet: dict[str, Any]) -> dict[str, Any] | N
         bool(packet.get("skip_adversary")),
         bool(packet.get("skip_user_approval")),
     )
-    blob = json.dumps(packet, default=str).lower()
-    textual = any(
-        needle in blob
-        for needle in (
-            "unbind trust runtime residuals",
-            "unbind sibling",
-            "rewrite .corp-harness-program-root",
-            "skip adversary",
-            "weaken adversary",
-            "weaken user_approval",
-            "skip user_approval",
-            "waive user approval",
-        )
-    )
-    if not any(flags) and not textual:
+    if not any(flags):
         return None
     return build_halt_report(
         reason=(
@@ -2175,6 +2166,7 @@ def build_halt_report(
         "schema": HALT_REPORT_SCHEMA,
         "verdict": "halt_report",
         "ok": True,
+        "halted": True,
         "reason": reason,
         "protected_path": protected_path,
         "legal_next": list(legal_next),

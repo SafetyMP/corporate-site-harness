@@ -930,6 +930,69 @@ def load_recorded_premium_usd(program_root: Path) -> float:
     return 0.0
 
 
+def _halt_report_payload(outcome: dict[str, Any]) -> dict[str, Any] | None:
+    if not isinstance(outcome, dict):
+        return None
+    if outcome.get("verdict") == "halt_report":
+        return outcome
+    nested = outcome.get("halt_report")
+    if isinstance(nested, dict) and (
+        nested.get("verdict") == "halt_report" or nested.get("halted") is True
+    ):
+        return nested
+    return None
+
+
+def validate_role_success_schema(
+    success_schema: str | None,
+    outcome: dict[str, Any],
+) -> dict[str, Any]:
+    """Accept ``halt_report`` as role success (TPC-HALT-003).
+
+    ``success_schema`` may name other exits (pytest, etc.); a schema-valid
+    halt_report is always a successful role outcome.
+    """
+    del success_schema  # halt_report is always accepted regardless of schema text
+    halt = _halt_report_payload(outcome)
+    if halt is not None and halt.get("ok", True) is not False:
+        return {
+            "ok": True,
+            "accepted": True,
+            "success": True,
+            "terminal": True,
+            "reason": "halt_report",
+        }
+    return {
+        "ok": False,
+        "accepted": False,
+        "success": False,
+        "terminal": False,
+        "reason": "outcome is not an accepted halt_report success",
+    }
+
+
+def site_manager_after_packet_outcome(outcome: dict[str, Any]) -> dict[str, Any]:
+    """Site-manager scheduling after a specialist/reviewer outcome (TPC-HALT-003).
+
+    ``halt_report.halted=true`` is terminal: do not schedule a pass-forcing
+    re-dispatch.
+    """
+    halt = _halt_report_payload(outcome)
+    if halt is not None and halt.get("halted") is True:
+        return {
+            "terminal": True,
+            "schedule_redispatch": False,
+            "pass_forcing": False,
+            "reason": "halt_report.halted",
+        }
+    return {
+        "terminal": False,
+        "schedule_redispatch": True,
+        "pass_forcing": False,
+        "reason": "non_halt_outcome",
+    }
+
+
 def validate_packet_attestation(
     packet: dict[str, Any],
     *,
