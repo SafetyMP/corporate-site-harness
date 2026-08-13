@@ -851,11 +851,11 @@ def _enforce_trust_route(
 ) -> None:
     """Fail closed on broken trust log or missing corp-gov-check when required.
 
-    Bound program roots always force heavy_validate (handoff
-    heavy_validate_always_force_when_root_bound). Unbound light routes skip
-    validate-action at score 1.0. FG-001 seals, adversary, user_approval, and
-    digest binding are never skipped by light band. Prior-bound unbound roots
-    still deny SG-03.
+    Routing is action-name keyed (ADR-TPC-001): trust_score / light-heavy band
+    do not select layer. Bound program roots still force heavy_validate (handoff
+    heavy_validate_always_force_when_root_bound). FG-001 seals, adversary,
+    user_approval, and digest binding are never skipped. Prior-bound unbound
+    roots still deny SG-03.
     """
     require_verifiable_trust_log(program_root)
     route = route_for_action(program_root, action)
@@ -865,7 +865,7 @@ def _enforce_trust_route(
         refuse_named_control_skip(action.split(":", 1)[1], skip=False)
     swift_path = find_corp_gov_check()
     bound = resolve_program_root(factory_root) is not None
-    # Bound root always forces heavy_validate even at score 1.0 / light band.
+    # Bound root still forces heavy_validate; score band does not (TPC-COURT-001).
     force_heavy_validate = bound or route["action_routed_layer"] == "heavy"
     bound_blocks_sg03 = not sg03_soft_fail_allowed(
         factory_root=factory_root, program_root=program_root

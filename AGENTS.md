@@ -39,9 +39,12 @@ Unsealed `generalPurpose` output is not gate evidence. Subcontractor ceilings:
 `max_depth=1`, `max_children=6`, `no_redelegation=true`; a hit is `halt_report`,
 not Sol/premium.
 
-`trust_score` is principal telemetry. Light band does not skip FG-001 seals,
-adversary, `user_approval`, or digest binding. No set-score / wipe-rebind
-amnesty. Process-error skip is not enabled.
+Allow/deny is Capability + Evidence + Spend only (`ADR-TPC-001`).
+`trust_score` is principal telemetry and must not route or gate allow/deny.
+Light band does not skip FG-001 seals, adversary, `user_approval`, or digest
+binding. FG-001 remains always-force by action name. Magnet cheat bits are
+audit-only. No set-score / wipe-rebind amnesty. Process-error skip is not
+enabled. Do not reopen fail-closed-runtime r1.
 
 Reviewers launch as a new Task (prompt = packet id + digests + oracle only).
 Covering a skipped gate voids involved packets; voided actor/session cannot

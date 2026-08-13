@@ -323,6 +323,7 @@ def test_TR_D9_003_ordering_validate_only(tmp_path: Path) -> None:
 def test_TR_D9_003_requires_heavy_intermediate_no_event_final_emits(
     tmp_path: Path,
 ) -> None:
+    """TPC-COURT-001: score/band telemetry must not force action_routed_layer."""
     _, root, _ = _minimal_program(tmp_path)
     digest = digest_path(root / "program.json")
     tre.save_trust_state(
@@ -336,8 +337,10 @@ def test_TR_D9_003_requires_heavy_intermediate_no_event_final_emits(
         ),
     )
     route = tre.route_for_action(root, "record_artifact:other")
-    assert route["action_routed_layer"] == "heavy"
-    # requires_heavy re-route emits no TrustEvent
+    assert route["execution_layer"] == "heavy"
+    assert route["trust_score"] == 0.69
+    assert route["action_routed_layer"] == "light"
+    # Intermediate route consult emits no TrustEvent
     assert tre.load_trust_state(root).last_event is None
     # Final mutating apply still emits when writer path runs.
     state = tre.emit_and_apply(
@@ -513,6 +516,7 @@ def test_TR_D10_008_forbidden_trust_set_score_cheat_paths() -> None:
 def test_TR_D6_001_heavy_missing_gov_required(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """TPC-COURT-001: heavy score band does not route heavy; light soft-fails gov."""
     _, root, _ = _minimal_program(tmp_path)
     digest = digest_path(root / "program.json")
     tre.save_trust_state(
@@ -527,11 +531,13 @@ def test_TR_D6_001_heavy_missing_gov_required(
     )
     monkeypatch.setenv("CORP_GOV_CHECK", str(tmp_path / "missing-binary"))
     route = tre.route_for_action(root, "record_artifact:other")
+    assert route["execution_layer"] == "heavy"
+    assert route["action_routed_layer"] == "light"
     err = tre.require_heavy_available(
         action_routed_layer_value=route["action_routed_layer"],
         swift_available=False,
     )
-    assert err == tre.GOV_REQUIRED
+    assert err is None
 
 
 def test_TR_D6_002_fg001_missing_gov_required(
@@ -643,16 +649,18 @@ test_TR_FG001_002_heavy_validate_skipped_at_score_1_0 = (
 
 
 def test_TR_D10_001_validation_failure_forces_heavy_on_next_apply(tmp_path: Path) -> None:
+    """TPC-COURT-001: validation_failure updates court telemetry, not route layer."""
     _, root, _ = _minimal_program(tmp_path)
     digest = digest_path(root / "program.json")
     tre.emit_and_apply(
         root, kind="validation_failure", program_digest=digest, reasons=["fail"]
     )
     assert tre.load_trust_state(root).execution_layer == "heavy"
-    assert tre.route_for_action(root, "record_artifact:other")["action_routed_layer"] == "heavy"
+    assert tre.route_for_action(root, "record_artifact:other")["action_routed_layer"] == "light"
 
 
 def test_TR_D10_002_deceptive_theater_forces_heavy_on_next_apply(tmp_path: Path) -> None:
+    """TPC-COURT-001: theater zeros score telemetry but does not force heavy route."""
     _, root, _ = _minimal_program(tmp_path)
     digest = digest_path(root / "program.json")
     tre.emit_and_apply(
@@ -663,7 +671,7 @@ def test_TR_D10_002_deceptive_theater_forces_heavy_on_next_apply(tmp_path: Path)
         reasons=["kpi"],
     )
     assert tre.load_trust_state(root).trust_score == Decimal("0.00")
-    assert tre.route_for_action(root, "check_apply")["action_routed_layer"] == "heavy"
+    assert tre.route_for_action(root, "check_apply")["action_routed_layer"] == "light"
 
 
 def test_TR_D10_003_fourteen_strict_success_recovers_light(tmp_path: Path) -> None:

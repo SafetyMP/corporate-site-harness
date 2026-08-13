@@ -32,10 +32,13 @@ CHAIN_RECOVERY_SCHEMA = "corporate-site-chain-recovery/v1"
 MUTATION_PERMIT_SCHEMA = "corporate-site-trust-mutation-permit/v1"
 SURFACE_BASELINE_SCHEMA = "corporate-site-trust-surface-baseline/v1"
 HALT_REPORT_SCHEMA = "corporate-site-halt-report/v1"
+THREE_PLANE_SCHEMA = "corporate-site-three-plane/v1"
 ACTIVE_PACKET_ENV = "CORP_HARNESS_ACTIVE_PACKET"
 ACTIVE_WRITE_SET_FILE = "trust-active-write-set.json"
 VOIDED_ACTORS_FILE = "trust-voided-actors.json"
 VOIDED_ACTORS_SCHEMA = "corporate-site-voided-actors/v1"
+THREE_PLANE_NAMES = ("capability", "evidence", "spend")
+MAGNET_CHEAT_BITS = frozenset({"hook_write", "actor_skip", "self_approval"})
 LEGAL_NEXT_COMMANDS = (
     "corp-harness mint-mutation-permit",
     "corp-harness status",
@@ -77,8 +80,10 @@ LOCKED_MANDATES = (
     "premium_not_trust_reward",
     "product_sites_must_not_edit_src_corp_harness",
     "scripts_harness_verify_and_adversarial_only",
+    "three_plane_only_capability_evidence_spend",
+    "trust_score_telemetry_not_routing",
 )
-LOG_ENTRY_KINDS = frozenset({"trust_event", "digest_rebind"})
+LOG_ENTRY_KINDS = frozenset({"trust_event", "digest_rebind", "magnet_cheat_bit"})
 # Pre-r3 writer emitted digest_amnesty during ADR-TR-001 score-reset amnesty.
 # Verify-only grandfather: historical lines may remain in the chain; append
 # writers must never mint new digest_amnesty (superseded by digest_rebind).
@@ -421,16 +426,113 @@ def expand_action(action: str) -> str:
 
 
 def action_routed_layer(score: Decimal, action: str) -> str:
+    """Route by action name only (TPC-COURT-001/002).
+
+    ``score`` remains for call-site compatibility and status telemetry but MUST
+    NOT select layer. Score-band helpers are not consulted here.
+    """
+    del score  # telemetry only; never selects layer (ADR-TPC-001)
     action = expand_action(action) if action != FG001_SEAL_ALIAS else action
     if action in ALWAYS_FORCE_HEAVY_ACTIONS or action == HEAVY_VALIDATE_ACTION:
-        return "heavy"
-    if execution_layer_for_score(score) == "heavy":
         return "heavy"
     return "light"
 
 
 def is_always_force_heavy(action: str) -> bool:
     return action in ALWAYS_FORCE_HEAVY_ACTIONS
+
+
+def evaluate_three_planes(
+    *,
+    capability_ok: bool,
+    evidence_ok: bool,
+    spend_ok: bool,
+    trust_score: Decimal | float | str | None = None,
+    execution_layer: str | None = None,
+    theater_kind: str | None = None,
+    magnet_bits: dict[str, Any] | list[str] | None = None,
+    career_ledger: Any = None,
+    usd_budget: Any = None,
+) -> dict[str, Any]:
+    """Allow/deny from Capability + Evidence + Spend only (TPC-PLANE-001).
+
+    trust_score, theater kind, magnet bits, career ledger, and USD budget are
+    accepted for call-site convenience and ignored for the decision.
+    """
+    del trust_score, execution_layer, theater_kind, magnet_bits, career_ledger
+    del usd_budget
+    planes = {
+        "capability": bool(capability_ok),
+        "evidence": bool(evidence_ok),
+        "spend": bool(spend_ok),
+    }
+    refused = [name for name in THREE_PLANE_NAMES if not planes[name]]
+    allowed = not refused
+    return {
+        "schema": THREE_PLANE_SCHEMA,
+        "allowed": allowed,
+        "permission": "allow" if allowed else "deny",
+        "planes": planes,
+        "refused_planes": refused,
+        "controls": list(THREE_PLANE_NAMES),
+        "ignored_for_decision": [
+            "trust_score",
+            "execution_layer",
+            "theater_kind",
+            "magnet_bits",
+            "career_ledger",
+            "usd_budget",
+        ],
+    }
+
+
+def append_magnet_cheat_bit(
+    program_root: Path,
+    *,
+    bit: str,
+    program_digest: str,
+    reasons: list[str] | None = None,
+) -> dict[str, Any]:
+    """Append an audit-only Magnet cheat bit; never changes score or routing."""
+    if bit not in MAGNET_CHEAT_BITS:
+        raise ContractError(
+            f"unknown magnet cheat bit: {bit!r}; allowed={sorted(MAGNET_CHEAT_BITS)}"
+        )
+    root = program_root.expanduser().resolve()
+    entry = append_trust_log_entry(
+        root,
+        entry_kind="magnet_cheat_bit",
+        program_digest=program_digest,
+        payload={
+            "bit": bit,
+            "audit_only": True,
+            "reasons": list(reasons or [bit]),
+        },
+    )
+    state_path = trust_state_path(root)
+    if state_path.is_file():
+        state = load_trust_state(root)
+        save_trust_state(
+            root,
+            TrustState(
+                trust_score=state.trust_score,
+                execution_layer=state.execution_layer,
+                program_digest=state.program_digest,
+                last_event=state.last_event,
+                updated_at=state.updated_at,
+                log_tip_hash=str(entry["entry_hash"]),
+                log_seq=int(entry["seq"]),
+                generation=state.generation,
+                pending_rebind_from=state.pending_rebind_from,
+                false_genesis=state.false_genesis,
+            ),
+        )
+    return entry
+
+
+def magnet_bits_affect_routing() -> bool:
+    """Magnet bits are audit-only (TPC-SEC-MAGNET-001)."""
+    return False
 
 
 @dataclass
@@ -1485,13 +1587,13 @@ def heavy_validate_forced(
     """Whether mutating apply must run heavy validate-action.
 
     Bound roots always force (handoff heavy_validate_always_force_when_root_bound).
-    Unbound roots force only when the trust band / action already routes heavy
-    (score < 0.70 or always-force seals); score 1.0 unbound skips the gate.
+    Unbound roots no longer force from trust band / score (TPC-COURT-001);
+    FG-001 always-force remains action-name keyed via ``action_routed_layer``.
     """
+    del program_root  # score/band telemetry is not consulted
     if program_root_is_bound(factory_root):
         return True
-    state = load_trust_state(program_root)
-    return execution_layer_for_score(state.trust_score) == "heavy"
+    return False
 
 
 def prior_binding_established(program_root: Path) -> bool:
