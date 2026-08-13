@@ -1531,14 +1531,33 @@ def bind_program_root(
     program_root: Path,
     *,
     seed_baseline: bool = True,
+    actor: str | None = None,
 ) -> Path:
-    """Write factory→corporate program-root binding marker."""
+    """Write factory→corporate program-root binding marker.
+
+    Session bind prefers ``CORP_HARNESS_PROGRAM_ROOT`` (env>marker). Rewriting an
+    existing marker to a different corporate root is user-gated
+    (ACC-TPC-MULTI-001 / ADR-TPC-001). Initial bind when the marker is absent,
+    and idempotent re-bind to the same path, remain allowed without actor=user.
+    """
     factory = factory_root.expanduser().resolve()
     corporate = program_root.expanduser().resolve()
     if not (corporate / "program.json").is_file():
         raise ContractError(f"program does not exist: {corporate / 'program.json'}")
     marker = factory / PROGRAM_ROOT_MARKER
-    marker.write_text(str(corporate) + "\n", encoding="utf-8")
+    new_text = str(corporate) + "\n"
+    if marker.is_file():
+        current = marker.read_text(encoding="utf-8")
+        if current.strip() != str(corporate) and actor != "user":
+            raise ContractError(
+                "unauthorized_actor: rewriting "
+                f"{PROGRAM_ROOT_MARKER} requires --actor user"
+            )
+        if current == new_text:
+            if seed_baseline:
+                update_surface_baseline(corporate, factory_root=factory)
+            return marker
+    marker.write_text(new_text, encoding="utf-8")
     if seed_baseline:
         update_surface_baseline(corporate, factory_root=factory)
     return marker
@@ -1580,13 +1599,12 @@ def heavy_validate_forced(
 ) -> bool:
     """Whether mutating apply must run heavy validate-action.
 
-    Bound roots always force (handoff heavy_validate_always_force_when_root_bound).
-    Unbound roots no longer force from trust band / score (TPC-COURT-001);
-    FG-001 always-force remains action-name keyed via ``action_routed_layer``.
+    Bound-root MUST NOT imply always-heavy because trust is low
+    (ACC-TPC-PIPE-001 / ADR-TPC-001). Score/band telemetry and bind state are
+    not consulted; FG-001 always-force remains action-name keyed via
+    ``action_routed_layer``.
     """
-    del program_root  # score/band telemetry is not consulted
-    if program_root_is_bound(factory_root):
-        return True
+    del program_root, factory_root
     return False
 
 
@@ -1709,9 +1727,8 @@ def classify_disabled_hooks_seal_bypass(
     )
     if not program_root_is_bound(factory):
         return None
-    if not baseline_had_factory_hooks(program_root) and not factory_hooks_installed(
-        factory
-    ):
+    # Only after a prior intact install was baselined (not genesis noise).
+    if not baseline_had_factory_hooks(program_root):
         return None
     if required_hooks_intact(factory):
         return None
@@ -2793,6 +2810,12 @@ def run_deferred_dirty_scan(
                 f"{root} != bound program root {bound} (env>marker)"
             )
         return {"ok": False, "dirty": True, "reported": reported, "skipped": False}
+
+    # ACC-TPC-SEC-GENESIS-001: cheap genesis is the should_run_deferred_dirty_scan
+    # early return above (clean unbound/new root). When that predicate is true —
+    # bound root, installed hooks, or prior binding — do not skip on
+    # is_true_genesis; bound-root OOB/seal scans must still run (AH-005/016).
+    # Deny-before-write on irreversible lock writes remains separate.
 
     findings = detect_dirty_surfaces(
         root,

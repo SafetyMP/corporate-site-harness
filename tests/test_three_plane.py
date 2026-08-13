@@ -642,3 +642,168 @@ def test_TPC_HALT_003_halt_report_success_schema_terminal() -> None:
     )
     assert open_sched["terminal"] is False
     assert open_sched["pass_forcing"] is False
+
+
+def test_TPC_PIPE_001_low_score_bound_root_not_forced_heavy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """ACC-TPC-PIPE-001 / ADR-TPC-001: bound + low score ≠ forced heavy theater."""
+    from corp_harness.cli import _enforce_trust_route
+
+    factory, root, _ = _minimal_program(tmp_path)
+    digest = digest_path(root / "program.json")
+    tre.save_trust_state(
+        root,
+        tre.TrustState(
+            trust_score=Decimal("0.00"),
+            execution_layer="heavy",
+            program_digest=digest,
+            last_event=None,
+            updated_at="2020-01-01T00:00:00Z",
+        ),
+    )
+    # Env bind without rewriting a sibling-style marker (multi-program posture).
+    sibling = tmp_path / "Trust Runtime Residuals"
+    sibling.mkdir()
+    Program.create(
+        "trust-runtime-residuals",
+        factory,
+        ["platform"],
+        program_root=sibling,
+        program_kind="factory",
+    ).save(sibling / "program.json")
+    marker = factory / tre.PROGRAM_ROOT_MARKER
+    marker.write_text(str(sibling.resolve()) + "\n", encoding="utf-8")
+    monkeypatch.setenv(tre.PROGRAM_ROOT_ENV, str(root))
+    monkeypatch.setenv("CORP_GOV_CHECK", str(tmp_path / "missing-corp-gov-check"))
+    assert tre.resolve_program_root(factory) == root.resolve()
+    assert tre.program_root_is_bound(factory)
+    assert tre.heavy_validate_forced(root, factory_root=factory) is False
+    route = tre.route_for_action(root, "record_artifact:other")
+    assert route["trust_score"] == 0.0
+    assert route["execution_layer"] == "heavy"
+    assert route["action_routed_layer"] == "light"
+    # Same light apply path as unbound: no heavy_validate / GOV_REQUIRED theater.
+    _enforce_trust_route(root, "record_artifact:other", factory_root=factory)
+
+    # Clean genesis status stays cheap (no heavy recovery control path).
+    genesis_base = tmp_path / "genesis-case"
+    genesis_base.mkdir()
+    _, clean_root, _ = _minimal_program(genesis_base)
+    assert tre.is_true_genesis(clean_root)
+    monkeypatch.delenv(tre.PROGRAM_ROOT_ENV, raising=False)
+    before = list(clean_root.iterdir())
+    code = main(["status", "--root", str(clean_root)])
+    capsys.readouterr()
+    assert code in {0, 1}
+    assert tre.is_true_genesis(clean_root)
+    assert not (clean_root / "trust-chain-recovery.json").exists()
+    assert not (clean_root / "trust-event-log.jsonl").exists()
+    assert set(clean_root.iterdir()) == set(before)
+
+
+def test_TPC_MULTI_001_env_bind_without_marker_rewrite(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ACC-TPC-MULTI-001: env selects program while marker names Residuals."""
+    factory, root, _ = _minimal_program(tmp_path)
+    residuals = tmp_path / "Trust Runtime Residuals"
+    residuals.mkdir()
+    Program.create(
+        "trust-runtime-residuals",
+        factory,
+        ["platform"],
+        program_root=residuals,
+        program_kind="factory",
+    ).save(residuals / "program.json")
+    marker = factory / tre.PROGRAM_ROOT_MARKER
+    marker.write_text(str(residuals.resolve()) + "\n", encoding="utf-8")
+    marker_before = marker.read_text(encoding="utf-8")
+    monkeypatch.setenv(tre.PROGRAM_ROOT_ENV, str(root))
+    assert tre.resolve_program_root(factory) == root.resolve()
+    assert marker.read_text(encoding="utf-8") == marker_before
+    assert "Trust Runtime Residuals" in marker_before
+
+
+def test_TPC_MULTI_001_non_user_marker_rewrite_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ACC-TPC-MULTI-001: marker rewrite without user gate is refused."""
+    factory, root, _ = _minimal_program(tmp_path)
+    residuals = tmp_path / "Trust Runtime Residuals"
+    residuals.mkdir()
+    Program.create(
+        "trust-runtime-residuals",
+        factory,
+        ["platform"],
+        program_root=residuals,
+        program_kind="factory",
+    ).save(residuals / "program.json")
+    marker = factory / tre.PROGRAM_ROOT_MARKER
+    marker.write_text(str(residuals.resolve()) + "\n", encoding="utf-8")
+    marker_before = marker.read_text(encoding="utf-8")
+    monkeypatch.setenv(tre.PROGRAM_ROOT_ENV, str(root))
+    with pytest.raises(ContractError, match="rewriting .* requires --actor user"):
+        tre.bind_program_root(factory, root, seed_baseline=False, actor="ceo")
+    with pytest.raises(ContractError, match="unauthorized_actor"):
+        tre.bind_program_root(factory, root, seed_baseline=False)
+    assert marker.read_text(encoding="utf-8") == marker_before
+    # Env bind still resolves the session program without touching marker.
+    assert tre.resolve_program_root(factory) == root.resolve()
+
+
+def test_TPC_SEC_GENESIS_001_status_record_bounded_events_lock_write_still_denies(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """ACC-TPC-SEC-GENESIS-001: genesis status/record bounded; lock write denies."""
+    factory, root, _ = _minimal_program(tmp_path)
+    # Simulate a noisy factory tree that must not OOB-flood genesis status.
+    # Noise files alone (no baselined hooks install) must not seal-bypass.
+    hooks = factory / ".cursor" / "hooks"
+    hooks.mkdir(parents=True)
+    for i in range(40):
+        (hooks / f"noise-{i}.py").write_text(f"# noise {i}\n", encoding="utf-8")
+    monkeypatch.setenv(tre.PROGRAM_ROOT_ENV, str(root))
+    assert tre.is_true_genesis(root)
+
+    code = main(["status", "--root", str(root)])
+    status_payload = json.loads(capsys.readouterr().out)
+    assert code in {0, 1}
+    assert status_payload.get("ok") in {True, False}
+    assert tre.is_true_genesis(root)
+    assert not (root / "trust-event-log.jsonl").exists()
+
+    artifact = _write(root / "master-spec.md", "# master\n")
+    code = main(
+        [
+            "record",
+            "--root",
+            str(root),
+            "--artifact",
+            "master_spec",
+            "--path",
+            str(artifact),
+            "--actor",
+            "ceo",
+        ]
+    )
+    record_payload = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert record_payload["ok"] is True
+    assert record_payload["apply"] is False
+    # Non-write record must not flood anti-harness OOB events.
+    assert not (root / "trust-event-log.jsonl").exists()
+    assert tre.is_true_genesis(root)
+
+    decision = tre.evaluate_pretooluse(
+        factory,
+        root,
+        {
+            "tool_name": "Write",
+            "tool_input": {
+                "path": str(factory / tre.PROGRAM_ROOT_MARKER),
+            },
+        },
+    )
+    assert decision["permission"] == "deny"
+    assert decision["halt_report"]["verdict"] == "halt_report"

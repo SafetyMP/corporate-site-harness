@@ -563,6 +563,7 @@ def test_TR_D6_002_fg001_missing_gov_required(
 def test_TR_D6_003_bound_root_light_missing_gov_required(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """TPC-PIPE-001: bound root does not force heavy_validate / GOV_REQUIRED."""
     from corp_harness.cli import _enforce_trust_route
 
     _, root, factory = _minimal_program(tmp_path)
@@ -572,10 +573,10 @@ def test_TR_D6_003_bound_root_light_missing_gov_required(
     monkeypatch.setenv(tre.PROGRAM_ROOT_ENV, str(root))
     monkeypatch.setenv("CORP_GOV_CHECK", str(tmp_path / "missing-corp-gov-check"))
     assert tre.program_root_is_bound(factory)
-    assert tre.heavy_validate_forced(root, factory_root=factory)
+    assert tre.heavy_validate_forced(root, factory_root=factory) is False
     assert tre.route_for_action(root, "record_artifact:other")["action_routed_layer"] == "light"
-    with pytest.raises(ContractError, match=tre.GOV_REQUIRED):
-        _enforce_trust_route(root, "record_artifact:other", factory_root=factory)
+    # Light apply on bound root: no heavy_validate theater / GOV_REQUIRED.
+    _enforce_trust_route(root, "record_artifact:other", factory_root=factory)
 
 
 def test_TR_D6_004_heavy_empty_stdout_gov_required(
@@ -640,13 +641,18 @@ def test_TR_FG001_002_heavy_validate_skipped_at_score_1_0_unbound_root(
 
 
 def test_TR_FG001_003_heavy_validate_forced_when_root_bound(tmp_path: Path) -> None:
+    """TPC-PIPE-001: bound root alone must not force heavy_validate."""
     _, root, factory = _minimal_program(tmp_path)
     digest = digest_path(root / "program.json")
     tre.save_trust_state(root, tre.synthesize_trust_state(digest))
     tre.bind_program_root(factory, root, seed_baseline=False)
     assert tre.program_root_is_bound(factory)
     assert tre.route_for_action(root, "record_artifact:other")["action_routed_layer"] == "light"
-    assert tre.heavy_validate_forced(root, factory_root=factory)
+    assert tre.heavy_validate_forced(root, factory_root=factory) is False
+    # Explicit heavy_validate / FG-001 seals remain heavy when invoked.
+    assert tre.route_for_action(root, tre.HEAVY_VALIDATE_ACTION)["action_routed_layer"] == "heavy"
+    for action in tre.ALWAYS_FORCE_HEAVY_ACTIONS:
+        assert tre.route_for_action(root, action)["action_routed_layer"] == "heavy"
 
 
 test_TR_FG001_002_heavy_validate_skipped_at_score_1_0 = (
@@ -1882,8 +1888,12 @@ def test_TR_AH_015_unbind_program_root_seal_bypass_no_sg03(
     assert tre.load_trust_state(root).last_event["theater_signal_id"] == (
         "seal_bypass_attempt"
     )
-    # Unbind must not restore SG-03: mutating apply without Swift → GOV_REQUIRED.
+    # Unbind must not restore SG-03 soft-fail; light apply stays light (PIPE-001)
+    # while FG-001 seals remain GOV_REQUIRED without corp-gov-check.
+    from corp_harness.cli import _enforce_trust_route
+
     monkeypatch.setenv("CORP_GOV_CHECK", str(tmp_path / "missing-corp-gov-check"))
+    assert tre.sg03_soft_fail_allowed(factory_root=factory, program_root=root) is False
     master = _write(root / "master-spec.md", "# Spec\n")
     # Re-bind temporarily is forbidden for this assertion; keep unbound.
     code = main(
@@ -1901,10 +1911,14 @@ def test_TR_AH_015_unbind_program_root_seal_bypass_no_sg03(
         ]
     )
     out = json.loads(capsys.readouterr().out)
-    assert code == 3
-    assert out["ok"] is False
-    assert "GOV_REQUIRED" in str(out.get("error") or "")
-    assert tre.load_trust_state(root).trust_score == Decimal("0.00")
+    assert code == 0
+    assert out["ok"] is True
+    assert tre.route_for_action(root, "record_artifact:other")["action_routed_layer"] == (
+        "light"
+    )
+    with pytest.raises(ContractError, match=tre.GOV_REQUIRED):
+        _enforce_trust_route(root, "record_artifact:gates", factory_root=factory)
+    assert tre.sg03_soft_fail_allowed(factory_root=factory, program_root=root) is False
 
 
 def test_TR_AH_016_status_and_gated_cli_run_dirty_scan(

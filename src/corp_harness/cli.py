@@ -53,7 +53,6 @@ from corp_harness.runtime_engine import (
     resolve_program_root,
     route_for_action,
     run_deferred_dirty_scan,
-    sg03_soft_fail_allowed,
     update_surface_baseline,
 )
 from corp_harness.swift_gov import ASSIST_COMMANDS, find_corp_gov_check, run_gov_command
@@ -938,32 +937,21 @@ def _enforce_trust_route(
 ) -> None:
     """Fail closed on broken trust log or missing corp-gov-check when required.
 
-    Routing is action-name keyed (ADR-TPC-001): trust_score / light-heavy band
-    do not select layer. Bound program roots still force heavy_validate (handoff
-    heavy_validate_always_force_when_root_bound). FG-001 seals, adversary,
-    user_approval, and digest binding are never skipped. Prior-bound unbound
-    roots still deny SG-03.
+    Routing is action-name keyed (ADR-TPC-001 / ACC-TPC-PIPE-001): trust_score,
+    light-heavy band, and bound-root MUST NOT select heavy_validate theater.
+    FG-001 seals, adversary, user_approval, and digest binding are never skipped.
     """
+    del factory_root  # bind state is not a heavy-force control (TPC-PIPE-001)
     require_verifiable_trust_log(program_root)
     route = route_for_action(program_root, action)
     if is_always_force_heavy(action):
         refuse_named_control_skip("fg001_seals", skip=False)
     elif action.startswith("record_gate:"):
         refuse_named_control_skip(action.split(":", 1)[1], skip=False)
-    swift_path = find_corp_gov_check()
-    bound = resolve_program_root(factory_root) is not None
-    # Bound root still forces heavy_validate; score band does not (TPC-COURT-001).
-    force_heavy_validate = bound or route["action_routed_layer"] == "heavy"
-    bound_blocks_sg03 = not sg03_soft_fail_allowed(
-        factory_root=factory_root, program_root=program_root
-    )
-    if not force_heavy_validate:
-        if bound_blocks_sg03 and swift_path is None:
-            raise ContractError(
-                f"{GOV_REQUIRED}: action {action!r} requires corp-gov-check "
-                "(bound/prior-bound program root; SG-03 not restored)"
-            )
+    # Unified apply pipeline: only action-routed heavy runs validate-action.
+    if route["action_routed_layer"] != "heavy":
         return
+    swift_path = find_corp_gov_check()
     err = require_heavy_available(
         action_routed_layer_value="heavy",
         swift_available=swift_path is not None,
@@ -971,11 +959,7 @@ def _enforce_trust_route(
     if err == GOV_REQUIRED:
         raise ContractError(
             f"{GOV_REQUIRED}: action {action!r} requires corp-gov-check "
-            + (
-                "(bound program root forces heavy_validate)"
-                if bound and route["action_routed_layer"] != "heavy"
-                else "(routed heavy but corp-gov-check missing)"
-            )
+            "(routed heavy but corp-gov-check missing)"
         )
     payload, code = run_gov_command(
         "validate-action",
