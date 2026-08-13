@@ -2284,7 +2284,7 @@ def test_FC_LOG_001_concurrent_append_unique_seq(tmp_path: Path) -> None:
                 program_digest=digest,
                 payload={"index": index},
             )
-        except BaseException as exc:  # noqa: BLE001 — collect for assertion
+        except Exception as exc:  # noqa: BLE001 — collect for assertion
             errors.append(exc)
 
     threading = __import__("threading")
