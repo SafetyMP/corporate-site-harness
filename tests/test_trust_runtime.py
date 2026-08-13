@@ -2376,7 +2376,7 @@ def test_FC_LOG_001_shared_lock_state_and_append(tmp_path: Path) -> None:
     tre.emit_and_apply(
         root, kind="strict_success", program_digest=digest, event_id="fc-lock-mix"
     )
-    errors: list[BaseException] = []
+    errors: list[Exception] = []
 
     def _worker(index: int) -> None:
         try:
@@ -2390,7 +2390,7 @@ def test_FC_LOG_001_shared_lock_state_and_append(tmp_path: Path) -> None:
             else:
                 state = tre.load_trust_state(root)
                 tre.save_trust_state(root, state)
-        except BaseException as exc:  # noqa: BLE001 — collect for assertion
+        except Exception as exc:
             errors.append(exc)
 
     threading = __import__("threading")
