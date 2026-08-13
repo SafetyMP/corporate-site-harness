@@ -45,7 +45,7 @@ def gate_report(
         script = root / argv[0]
         if not script.is_file():
             write(script, "#!/bin/sh\nexit 0\n")
-            os.chmod(script, 0o755)
+            os.chmod(script, 0o700)
         executable = write(
             root / "evidence" / f"{name}-executable.json",
             json.dumps(
@@ -159,8 +159,8 @@ def advance_to_adversary(tmp_path: Path) -> tuple[Program, Path, Path]:
     harness = site / "scripts" / "harness"
     verification_script = write(harness / "verify.sh", "#!/bin/sh\nexit 0\n")
     adversarial_script = write(harness / "adversarial.sh", "#!/bin/sh\nexit 0\n")
-    os.chmod(verification_script, 0o755)
-    os.chmod(adversarial_script, 0o755)
+    os.chmod(verification_script, 0o700)
+    os.chmod(adversarial_script, 0o700)
     runtime_manifest = write(site / "pyproject.toml", "[project]\nname = 'app'\n")
     program.record_artifact("adr:ADR-001", adr, "site-specialist", root)
     program.record_artifact("implementation", implementation, "site-specialist", root)
@@ -408,9 +408,9 @@ def test_gate_cannot_be_recorded_out_of_phase(tmp_path: Path) -> None:
 
 def test_executable_mode_change_stales_artifact(tmp_path: Path) -> None:
     script = write(tmp_path / "verify.sh", "#!/bin/sh\nexit 0\n")
-    os.chmod(script, 0o755)
+    os.chmod(script, 0o700)
     initial = digest_path(script)
-    os.chmod(script, 0o644)
+    os.chmod(script, 0o600)
 
     assert digest_path(script) != initial
 
@@ -444,8 +444,8 @@ def test_pass_gate_rejects_failed_executable_evidence(tmp_path: Path) -> None:
     harness = site / "scripts" / "harness"
     verify = write(harness / "verify.sh", "#!/bin/sh\nexit 0\n")
     adversarial = write(harness / "adversarial.sh", "#!/bin/sh\nexit 0\n")
-    os.chmod(verify, 0o755)
-    os.chmod(adversarial, 0o755)
+    os.chmod(verify, 0o700)
+    os.chmod(adversarial, 0o700)
     for name, path in {
         "adr:ADR-001": write(site / "ADR.md", "# ADR\n"),
         "implementation": write(site / "app.py", "pass\n"),
@@ -829,8 +829,8 @@ def _harness_scripts(site: Path) -> Path:
     harness = site / "scripts" / "harness"
     verify = write(harness / "verify.sh", "#!/bin/sh\nexit 0\n")
     adversarial = write(harness / "adversarial.sh", "#!/bin/sh\nexit 0\n")
-    os.chmod(verify, 0o755)
-    os.chmod(adversarial, 0o755)
+    os.chmod(verify, 0o700)
+    os.chmod(adversarial, 0o700)
     return harness
 
 
@@ -880,7 +880,7 @@ def test_verification_scripts_accepts_canonical_harness(tmp_path: Path) -> None:
     baseline = artifact.sha256
     write(site / "scripts" / "capture-screenshots.mjs", "console.log(1)\n")
     assert digest_path(harness) == baseline
-    os.chmod(harness / "verify.sh", 0o644)
+    os.chmod(harness / "verify.sh", 0o600)
     assert digest_path(harness) != baseline
 
 

@@ -838,10 +838,8 @@ def emit_and_apply(
     )
     event["dedup_fingerprint"] = fingerprint
 
-    tip_hash = state.log_tip_hash
-    tip_seq = state.log_seq
     if state.pending_rebind_from:
-        rebind_entry = append_trust_log_entry(
+        append_trust_log_entry(
             root,
             entry_kind="digest_rebind",
             program_digest=program_digest,
@@ -857,8 +855,6 @@ def emit_and_apply(
                 ),
             },
         )
-        tip_hash = str(rebind_entry["entry_hash"])
-        tip_seq = int(rebind_entry["seq"])
 
     log_entry = append_trust_log_entry(
         root,

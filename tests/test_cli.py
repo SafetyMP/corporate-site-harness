@@ -11,7 +11,7 @@ def add_verify_script(site: Path) -> None:
     for name in ("verify.sh", "adversarial.sh"):
         script = harness / name
         script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-        os.chmod(script, 0o755)
+        os.chmod(script, 0o700)
 
 
 def test_init_is_dry_run_without_apply(tmp_path: Path, capsys) -> None:

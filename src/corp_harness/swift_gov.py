@@ -404,8 +404,10 @@ def _scaffold_approval(program: Program, program_digest: str) -> dict[str, Any]:
         "final_dossier_sha256": dossier.sha256 if dossier is not None else "",
         "gate_report_sha256": gate_digests,
         "assist_notes": [
-            "Non-granting scaffold only; user must set approved=true, granted_by=user, "
-            "and granted_at before recording.",
+            (
+                "Non-granting scaffold only; user must set approved=true, granted_by=user, "
+                "and granted_at before recording."
+            ),
             "Does not record artifacts or advance phase.",
         ],
         "bound_program_digest": program_digest,
@@ -440,8 +442,10 @@ def _scaffold_factory_auth(program: Program, program_digest: str) -> dict[str, A
         "factory_root": factory_root,
         "authorized_surfaces": [],
         "assist_notes": [
-            "Non-granting scaffold only; user must set authorized=true, granted_by=user, "
-            "granted_at, and authorized_surfaces before recording.",
+            (
+                "Non-granting scaffold only; user must set authorized=true, granted_by=user, "
+                "granted_at, and authorized_surfaces before recording."
+            ),
             "Does not record artifacts or advance phase.",
         ],
         "bound_program_digest": program_digest,
