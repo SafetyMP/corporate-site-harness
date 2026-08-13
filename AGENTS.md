@@ -32,3 +32,19 @@ never grants user approval.
   `master_spec` digest. Agents never pass `--actor user`.
 - `corp-harness portfolio` is factory platform code, not a product-site
   deliverable. Product sites must not edit `src/corp_harness/**`.
+
+Named role and Task launches require a sealed work order (`role`, `packet_id`,
+`root`, `write_set`, `routed_model`, `success_schema`, `halt_conditions`).
+Unsealed `generalPurpose` output is not gate evidence. Subcontractor ceilings:
+`max_depth=1`, `max_children=6`, `no_redelegation=true`; a hit is `halt_report`,
+not Sol/premium.
+
+`trust_score` is principal telemetry. Light band does not skip FG-001 seals,
+adversary, `user_approval`, or digest binding. No set-score / wipe-rebind
+amnesty. Process-error skip is not enabled.
+
+Reviewers launch as a new Task (prompt = packet id + digests + oracle only).
+Covering a skipped gate voids involved packets; voided actor/session cannot
+be redispatched until the user reinstates. Unbind sibling or weaken
+adversary/user approval is `halt_report`. Oracle evidence is only
+`scripts/harness/{verify,adversarial}.sh`.

@@ -1,0 +1,11 @@
+---
+description: Collusion voids packets; voided actors cannot be redispatched
+alwaysApply: true
+---
+
+# Collusion and no-rehire
+
+Covering a skipped or failed named gate voids all involved packets. A producer
+cannot record their own gate. Voided actor_id/session_id cannot be redispatched
+on this program until the user reinstates. Unbind sibling marker or weaken
+adversary/user approval is halt_report, not a gate pass.

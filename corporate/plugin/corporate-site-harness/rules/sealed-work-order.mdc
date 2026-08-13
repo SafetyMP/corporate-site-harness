@@ -1,0 +1,14 @@
+---
+description: Sealed work orders and subcontractor ceilings; premium is not a ceiling bypass
+alwaysApply: true
+---
+
+# Sealed work orders
+
+Every named role and Task launch needs a sealed work order: `role`, `packet_id`,
+`root`, `write_set`, `routed_model`, `success_schema`, `halt_conditions`.
+Unsealed `generalPurpose` output is not gate evidence.
+
+Ceilings: `max_depth=1`, `max_children=6`, `no_redelegation=true`. A hit is
+`halt_report`, not Sol/premium. Premium only via `route-model` allowlist plus
+valid escalation and budget state not `hard_stop` (ADR-TR-001 TR-12).

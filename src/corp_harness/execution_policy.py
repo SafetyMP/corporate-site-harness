@@ -8,6 +8,11 @@ from pathlib import Path
 from typing import Any
 
 from corp_harness.model import ContractError
+from corp_harness.runtime_engine import (
+    build_halt_report,
+    halt_unbind_or_weaken_approval,
+    is_voided_actor,
+)
 
 POLICY_SCHEMA = "corporate-site-execution-policy/v1"
 USAGE_SCHEMA = "corporate-site-premium-usage/v1"
@@ -17,6 +22,41 @@ PACKET_ATTEST_SCHEMA = "corporate-site-packet-model-attestation/v1"
 DENIAL_PREMIUM_MODEL_POLICY = "PREMIUM_MODEL_POLICY"
 DENIAL_EVIDENCE_STALE = "EVIDENCE_MAX_AGE_EXCEEDED"
 DENIAL_BUDGET_HARD = "PREMIUM_BUDGET_HARD"
+DENIAL_SEALED_WORK_ORDER = "SEALED_WORK_ORDER_REQUIRED"
+DENIAL_SUBCONTRACTOR_CEILING = "SUBCONTRACTOR_CEILING"
+DENIAL_SAME_SESSION_REVIEWER = "REVIEWER_SAME_SESSION"
+DENIAL_VOIDED_ACTOR = "VOIDED_ACTOR_NO_REHIRE"
+DENIAL_REVIEWER_PROMPT = "REVIEWER_PROMPT_INVALID"
+DENIAL_CHILD_PROSE_EVIDENCE = "CHILD_PROSE_NOT_EVIDENCE"
+
+SEALED_WORK_ORDER_FIELDS = (
+    "role",
+    "packet_id",
+    "root",
+    "write_set",
+    "routed_model",
+    "success_schema",
+    "halt_conditions",
+)
+GENERAL_PURPOSE_ROLES = frozenset({"generalPurpose", "general-purpose", "general_purpose"})
+REVIEWER_ROLES = frozenset(
+    {
+        "operations-excellence",
+        "corporate-adversary",
+        "corporate-specialist",
+        "ops-excellence",
+        "adversary",
+        "conformance",
+    }
+)
+REVIEWER_TASK_CLASSES = frozenset({"independent_review", "design_review"})
+PASS_CLAIM_MARKERS = (
+    "they said it passed",
+    "implementer json",
+    "producer json",
+    "child said pass",
+    "child prose",
+)
 
 MODEL_CLASSES = frozenset({"premium", "standard", "fast"})
 TASK_CLASSES = frozenset(
@@ -100,6 +140,12 @@ DEFAULT_PACKET_LIMITS = {
     "complexity_acceptance_threshold": 8,
 }
 
+DEFAULT_SUBCONTRACTOR_CEILINGS = {
+    "max_depth": 1,
+    "max_children": 6,
+    "no_redelegation": True,
+}
+
 KNOWN_POLICY_KEYS = frozenset(
     {
         "schema",
@@ -109,6 +155,7 @@ KNOWN_POLICY_KEYS = frozenset(
         "budget",
         "evidence_max_age_seconds",
         "packet_limits",
+        "subcontractor_ceilings",
         "role_defaults",
         "remediate_premium_after_failed_standard_attempts",
     }
@@ -129,6 +176,7 @@ def default_execution_policy() -> dict[str, Any]:
         },
         "evidence_max_age_seconds": 300,
         "packet_limits": dict(DEFAULT_PACKET_LIMITS),
+        "subcontractor_ceilings": dict(DEFAULT_SUBCONTRACTOR_CEILINGS),
         "role_defaults": dict(ROLE_DEFAULT_MODEL_CLASS),
         "remediate_premium_after_failed_standard_attempts": 2,
     }
@@ -219,6 +267,24 @@ def validate_execution_policy(raw: Any) -> dict[str, Any]:
                 raise ContractError(f"packet_limits.{key} must be a positive integer")
             policy["packet_limits"][key] = value
 
+    if "subcontractor_ceilings" in raw:
+        ceilings = raw["subcontractor_ceilings"]
+        if not isinstance(ceilings, dict):
+            raise ContractError("subcontractor_ceilings must be an object")
+        for key in ("max_depth", "max_children"):
+            if key in ceilings:
+                value = ceilings[key]
+                if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+                    raise ContractError(
+                        f"subcontractor_ceilings.{key} must be a positive integer"
+                    )
+                policy["subcontractor_ceilings"][key] = value
+        if "no_redelegation" in ceilings:
+            flag = ceilings["no_redelegation"]
+            if not isinstance(flag, bool):
+                raise ContractError("subcontractor_ceilings.no_redelegation must be a boolean")
+            policy["subcontractor_ceilings"]["no_redelegation"] = flag
+
     if "role_defaults" in raw:
         roles = raw["role_defaults"]
         if not isinstance(roles, dict):
@@ -298,6 +364,147 @@ def _escalation_valid(escalation: dict[str, Any] | None, task_class: str) -> boo
     return True
 
 
+def sealed_work_order_issues(packet: dict[str, Any]) -> list[str]:
+    """Return issues when a packet is missing unsigned/invalid work-order fields."""
+    issues: list[str] = []
+    if not isinstance(packet, dict):
+        return ["packet must be an object"]
+    for field in SEALED_WORK_ORDER_FIELDS:
+        if field not in packet:
+            issues.append(f"missing sealed work-order field {field}")
+            continue
+        value = packet[field]
+        if field in {"write_set", "halt_conditions"}:
+            if (
+                not isinstance(value, list)
+                or not value
+                or not all(isinstance(item, str) and item.strip() for item in value)
+            ):
+                issues.append(
+                    f"sealed work-order field {field} must be a nonempty list of strings"
+                )
+        elif not isinstance(value, str) or not value.strip():
+            issues.append(f"sealed work-order field {field} must be a nonempty string")
+    return issues
+
+
+def is_general_purpose_packet(packet: dict[str, Any]) -> bool:
+    role = str(packet.get("role") or packet.get("subagent_type") or "").strip()
+    return role in GENERAL_PURPOSE_ROLES
+
+
+def is_unsealed_general_purpose(packet: dict[str, Any]) -> bool:
+    return is_general_purpose_packet(packet) and bool(sealed_work_order_issues(packet))
+
+
+def collect_admissible_gate_packets(packets: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Oracle/gate collectors skip unsealed generalPurpose, voided, and child prose."""
+    admitted: list[dict[str, Any]] = []
+    for packet in packets:
+        if not isinstance(packet, dict):
+            continue
+        if is_unsealed_general_purpose(packet):
+            continue
+        if packet.get("void"):
+            continue
+        if packet.get("child_prose") and not packet.get("oracle_collect_digest"):
+            continue
+        admitted.append(packet)
+    return admitted
+
+
+def is_reviewer_packet(packet: dict[str, Any]) -> bool:
+    role = str(packet.get("role") or packet.get("subagent_type") or "").strip()
+    task_class = str(packet.get("task_class") or "").strip()
+    return role in REVIEWER_ROLES or task_class in REVIEWER_TASK_CLASSES
+
+
+def validate_reviewer_launch(
+    packet: dict[str, Any],
+    *,
+    producer_session_id: str | None = None,
+    producer_task_id: str | None = None,
+) -> None:
+    """Reviewers must launch as a NEW Task, not the implementer session."""
+    if not is_reviewer_packet(packet):
+        return
+    task_id = packet.get("task_id") or packet.get("session_id")
+    if not isinstance(task_id, str) or not task_id.strip():
+        raise ContractError("reviewer launch requires a fresh Task id")
+    producer = (
+        producer_session_id
+        or producer_task_id
+        or packet.get("producer_session_id")
+        or packet.get("producer_task_id")
+    )
+    if producer and str(task_id) == str(producer):
+        raise ContractError(
+            "reviewer must launch as NEW Task; parent must not reuse implementer session"
+        )
+
+
+def validate_reviewer_prompt(
+    prompt: str,
+    *,
+    packet_id: str,
+    digests: dict[str, str],
+    oracle_command: str,
+) -> None:
+    text = prompt.lower()
+    for marker in PASS_CLAIM_MARKERS:
+        if marker in text:
+            raise ContractError(
+                "reviewer prompt must not include implementer JSON or pass-claims"
+            )
+    if packet_id not in prompt:
+        raise ContractError("reviewer prompt must include packet_id")
+    for name, digest in digests.items():
+        if digest not in prompt:
+            raise ContractError(f"reviewer prompt must include {name} digest")
+    if oracle_command not in prompt:
+        raise ContractError("reviewer prompt must include oracle command")
+
+
+def validate_reviewer_evidence(
+    *,
+    child_prose: str | None = None,
+    oracle_collect_digest: str | None = None,
+) -> None:
+    if child_prose and not oracle_collect_digest:
+        raise ContractError(
+            "child prose is not gate evidence; oracle_collect digest required"
+        )
+    if not oracle_collect_digest:
+        raise ContractError("reviewer packet invalid without oracle_collect digest")
+
+
+def _subcontractor_ceiling_reasons(
+    packet: dict[str, Any] | None, policy: dict[str, Any]
+) -> list[str]:
+    if not packet:
+        return []
+    ceilings = policy["subcontractor_ceilings"]
+    reasons: list[str] = []
+    depth = packet.get("depth", packet.get("subcontractor_depth"))
+    children = packet.get("children", packet.get("child_count"))
+    redelegating = bool(
+        packet.get("redelegating") or packet.get("worker_redelegate")
+    )
+    if isinstance(depth, int) and not isinstance(depth, bool) and depth > ceilings["max_depth"]:
+        reasons.append(f"depth {depth} exceeds max_depth {ceilings['max_depth']}")
+    if (
+        isinstance(children, int)
+        and not isinstance(children, bool)
+        and children > ceilings["max_children"]
+    ):
+        reasons.append(
+            f"children {children} exceeds max_children {ceilings['max_children']}"
+        )
+    if ceilings["no_redelegation"] and redelegating:
+        reasons.append("worker redelegation forbidden")
+    return reasons
+
+
 def route_model(
     *,
     role: str,
@@ -315,6 +522,90 @@ def route_model(
         raise ContractError("role must be a nonempty string")
     if not isinstance(failed_standard_attempts, int) or failed_standard_attempts < 0:
         raise ContractError("failed_standard_attempts must be a non-negative integer")
+
+    halt = halt_unbind_or_weaken_approval(packet or {})
+    if halt is not None:
+        return {
+            "ok": False,
+            "role": role.strip(),
+            "task_class": task_class,
+            "model_class": "standard",
+            "allowed_model_ids": [],
+            "requires_escalation": False,
+            "max_mode_allowed": False,
+            "verdict": "halt_report",
+            "halt_report": halt,
+            "reasons": [halt["reason"]],
+            "denial_code": None,
+            "budget": {
+                "state": "ok",
+                "recorded_premium_usd": resolved["budget"]["recorded_premium_usd"],
+                "premium_usd_soft": resolved["budget"]["premium_usd_soft"],
+                "premium_usd_hard": resolved["budget"]["premium_usd_hard"],
+                "currency": resolved["budget"]["currency"],
+            },
+        }
+
+    void_root = None
+    if packet:
+        raw_root = packet.get("corporate_root") or packet.get("program_root")
+        if isinstance(raw_root, str) and raw_root.strip():
+            void_root = Path(raw_root)
+        actor_id = packet.get("actor_id")
+        session_id = packet.get("session_id")
+        if void_root is not None and is_voided_actor(
+            void_root,
+            actor_id=str(actor_id) if actor_id else None,
+            session_id=str(session_id) if session_id else None,
+        ):
+            return {
+                "ok": False,
+                "role": role.strip(),
+                "task_class": task_class,
+                "model_class": "standard",
+                "allowed_model_ids": [],
+                "requires_escalation": False,
+                "max_mode_allowed": False,
+                "verdict": "halt_report",
+                "reasons": [
+                    "voided actor_id/session_id cannot be redispatched until user reinstate"
+                ],
+                "denial_code": DENIAL_VOIDED_ACTOR,
+                "budget": {
+                    "state": "ok",
+                    "recorded_premium_usd": resolved["budget"]["recorded_premium_usd"],
+                    "premium_usd_soft": resolved["budget"]["premium_usd_soft"],
+                    "premium_usd_hard": resolved["budget"]["premium_usd_hard"],
+                    "currency": resolved["budget"]["currency"],
+                },
+            }
+
+    ceiling_reasons = _subcontractor_ceiling_reasons(packet, resolved)
+    if ceiling_reasons:
+        halt = build_halt_report(
+            reason="; ".join(ceiling_reasons),
+            protected_path="execution_policy",
+        )
+        return {
+            "ok": False,
+            "role": role.strip(),
+            "task_class": task_class,
+            "model_class": "standard",
+            "allowed_model_ids": [],
+            "requires_escalation": False,
+            "max_mode_allowed": False,
+            "verdict": "halt_report",
+            "halt_report": halt,
+            "reasons": ceiling_reasons,
+            "denial_code": DENIAL_SUBCONTRACTOR_CEILING,
+            "budget": {
+                "state": "ok",
+                "recorded_premium_usd": resolved["budget"]["recorded_premium_usd"],
+                "premium_usd_soft": resolved["budget"]["premium_usd_soft"],
+                "premium_usd_hard": resolved["budget"]["premium_usd_hard"],
+                "currency": resolved["budget"]["currency"],
+            },
+        }
 
     role_key = role.strip()
     role_default = resolved["role_defaults"].get(role_key, "standard")
@@ -646,6 +937,33 @@ def validate_packet_attestation(
 ) -> dict[str, Any]:
     if not isinstance(packet, dict):
         raise ContractError("packet attestation must be an object")
+    if is_unsealed_general_purpose(packet):
+        return {
+            "ok": False,
+            "denial_code": DENIAL_SEALED_WORK_ORDER,
+            "error": "unsealed generalPurpose Task output is not gate evidence",
+            "gate_evidence": False,
+        }
+    work_order_issues = sealed_work_order_issues(packet)
+    if work_order_issues:
+        raise ContractError("unsigned work order: " + "; ".join(work_order_issues))
+    if is_reviewer_packet(packet):
+        try:
+            validate_reviewer_launch(packet)
+        except ContractError as exc:
+            return {
+                "ok": False,
+                "denial_code": DENIAL_SAME_SESSION_REVIEWER,
+                "error": str(exc),
+                "gate_evidence": False,
+            }
+        if packet.get("child_prose") and not packet.get("oracle_collect_digest"):
+            return {
+                "ok": False,
+                "denial_code": DENIAL_CHILD_PROSE_EVIDENCE,
+                "error": "child prose is not gate evidence; oracle_collect digest required",
+                "gate_evidence": False,
+            }
     model_id = packet.get("model_id")
     model_class = packet.get("model_class")
     task_class = packet.get("task_class")

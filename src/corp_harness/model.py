@@ -521,6 +521,10 @@ class Program:
     ) -> Gate:
         if name not in GATE_TARGETS:
             raise ContractError(f"unknown gate: {name}")
+        if status_value.upper() in {"SKIP", "COVERED"}:
+            raise ContractError(
+                "covering a skipped/failed named gate voids involved packets"
+            )
         if self.phase != GATE_PHASES[name]:
             raise ContractError(f"{name} may only be recorded during {GATE_PHASES[name]}")
         expected_role = GATE_ROLES[name]

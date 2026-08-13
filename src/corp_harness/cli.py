@@ -32,13 +32,16 @@ from corp_harness.runtime_engine import (
     GOV_REQUIRED,
     THEATER_SIGNAL_IDS,
     TRUST_GATED_CLI_SURFACES,
+    apply_covered_skip_void,
     attach_trust_status,
     consume_mutation_permit,
     emit_and_apply,
+    is_always_force_heavy,
     mint_mutation_permit,
     mutation_permit_path,
     read_trust_log,
     recover_trust_chain,
+    refuse_named_control_skip,
     report_anti_harness_event,
     require_heavy_available,
     require_verifiable_trust_log,
@@ -270,7 +273,7 @@ def build_parser() -> argparse.ArgumentParser:
     trust_report.add_argument("--event-id", help="optional TrustEvent event_id")
     trust_recover = trust_sub.add_parser(
         "recover-chain",
-        help="user-only seal of a broken trust log (no wipe, no set-score)",
+        help="user-only seal of a broken trust log (no wipe, no score mutation)",
     )
     _root_argument(trust_recover)
     trust_recover.add_argument("--actor", required=True)
@@ -391,6 +394,20 @@ def dispatch(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         else:
             if args.status is None:
                 raise ContractError("--status is required when recording a gate")
+            apply_covered_skip_void(
+                program_root,
+                packets=[
+                    {
+                        "packet_id": args.gate,
+                        "actor_id": args.actor,
+                        "session_id": args.actor,
+                    }
+                ],
+                covering=str(args.status).upper() in {"SKIP", "COVERED"},
+                gate_status=str(args.status),
+                actor_ids=[args.actor],
+                session_ids=[args.actor],
+            )
             action = f"record_gate:{args.gate}"
             recorded = program.record_gate(
                 args.gate,
@@ -537,7 +554,7 @@ def _route_model(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         max_mode=bool(args.max_mode),
     )
     exit_code = 0
-    if result.get("denial_code"):
+    if result.get("denial_code") or result.get("ok") is False:
         exit_code = 1
         result["ok"] = False
     return result, exit_code
@@ -836,10 +853,16 @@ def _enforce_trust_route(
 
     Bound program roots always force heavy_validate (handoff
     heavy_validate_always_force_when_root_bound). Unbound light routes skip
-    validate-action at score 1.0. Prior-bound unbound roots still deny SG-03.
+    validate-action at score 1.0. FG-001 seals, adversary, user_approval, and
+    digest binding are never skipped by light band. Prior-bound unbound roots
+    still deny SG-03.
     """
     require_verifiable_trust_log(program_root)
     route = route_for_action(program_root, action)
+    if is_always_force_heavy(action):
+        refuse_named_control_skip("fg001_seals", skip=False)
+    elif action.startswith("record_gate:"):
+        refuse_named_control_skip(action.split(":", 1)[1], skip=False)
     swift_path = find_corp_gov_check()
     bound = resolve_program_root(factory_root) is not None
     # Bound root always forces heavy_validate even at score 1.0 / light band.

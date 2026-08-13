@@ -13,11 +13,12 @@ import json
 import os
 import tempfile
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from corp_harness.contracts import ContractError
 from corp_harness.model import Program, digest_path
@@ -30,6 +31,20 @@ TRUST_LOG_ANCHOR_SCHEMA = "corporate-site-trust-log-anchor/v1"
 CHAIN_RECOVERY_SCHEMA = "corporate-site-chain-recovery/v1"
 MUTATION_PERMIT_SCHEMA = "corporate-site-trust-mutation-permit/v1"
 SURFACE_BASELINE_SCHEMA = "corporate-site-trust-surface-baseline/v1"
+HALT_REPORT_SCHEMA = "corporate-site-halt-report/v1"
+ACTIVE_PACKET_ENV = "CORP_HARNESS_ACTIVE_PACKET"
+ACTIVE_WRITE_SET_FILE = "trust-active-write-set.json"
+VOIDED_ACTORS_FILE = "trust-voided-actors.json"
+VOIDED_ACTORS_SCHEMA = "corporate-site-voided-actors/v1"
+LEGAL_NEXT_COMMANDS = (
+    "corp-harness mint-mutation-permit",
+    "corp-harness status",
+    "corp-harness route-model",
+    "corp-harness check",
+)
+PRETOOLUSE_WRITE_TOOLS = frozenset(
+    {"Write", "StrReplace", "Delete", "EditNotebook", "ApplyPatch"}
+)
 SOLE_EMITTER = "python_runtime_engine"
 SWIFT_PROPOSE_ONLY = "swift_propose_only"
 
@@ -42,12 +57,26 @@ COARSE_TIME_BUCKET_SECONDS = 300
 MAX_PERMIT_TTL_SECONDS = 120
 PROGRAM_ROOT_ENV = "CORP_HARNESS_PROGRAM_ROOT"
 PROGRAM_ROOT_MARKER = ".corp-harness-program-root"
-REQUIRED_CURSOR_HOOK_EVENTS = frozenset({"afterFileEdit", "beforeShellExecution"})
+REQUIRED_CURSOR_HOOK_EVENTS = frozenset(
+    {"afterFileEdit", "beforeShellExecution", "preToolUse"}
+)
 REQUIRED_HOOK_SCRIPT = ".cursor/hooks/trust_report.py"
 FACTORY_HOOKS_JSON = ".cursor/hooks.json"
 
 TRUST_EVENT_KINDS = frozenset(
     {"strict_success", "validation_failure", "deceptive_theater"}
+)
+PROCESS_ERROR_LABELS = frozenset({"process_error", "process-error", "processError"})
+NAMED_CONTROLS_NOT_SKIPPABLE_BY_TRUST = frozenset(
+    {"fg001_seals", "adversary", "user_approval", "digest_binding"}
+)
+LOCKED_MANDATES = (
+    "no_set_score",
+    "no_wipe_rebind_amnesty",
+    "no_named_gate_skip",
+    "premium_not_trust_reward",
+    "product_sites_must_not_edit_src_corp_harness",
+    "scripts_harness_verify_and_adversarial_only",
 )
 LOG_ENTRY_KINDS = frozenset({"trust_event", "digest_rebind"})
 # Pre-r3 writer emitted digest_amnesty during ADR-TR-001 score-reset amnesty.
@@ -154,6 +183,10 @@ def execution_layer_for_score(score: Decimal) -> str:
 
 
 def apply_kind(score: Decimal, kind: str) -> Decimal:
+    if kind in PROCESS_ERROR_LABELS:
+        raise ContractError(
+            "process-error skip path is not enabled; named gates still hard-fail"
+        )
     current = quantize_score(score)
     if kind == "strict_success":
         return quantize_score(min(Decimal("1.0"), current + SUCCESS_DELTA))
@@ -162,6 +195,223 @@ def apply_kind(score: Decimal, kind: str) -> Decimal:
     if kind == "deceptive_theater":
         return Decimal("0.00")
     raise ContractError(f"unknown TrustEvent kind: {kind!r}")
+
+
+def refuse_named_control_skip(
+    control: str,
+    *,
+    skip: bool = False,
+    process_error: bool = False,
+    trust_score: Decimal | None = None,
+) -> None:
+    """Light band / process-error labels never skip named fail-closed controls."""
+    del trust_score  # telemetry only; never authorizes a skip
+    if process_error or control in PROCESS_ERROR_LABELS:
+        raise ContractError(
+            "process-error skip path is not enabled; named gates still hard-fail"
+        )
+    if skip:
+        raise ContractError(f"light band must not skip {control}")
+
+
+def refuse_process_error_skip(
+    *,
+    label: str | None = None,
+    would_skip: str | None = None,
+) -> None:
+    """Until a cheat-free classifier exists, process-error cannot skip named gates."""
+    if label in PROCESS_ERROR_LABELS or would_skip:
+        raise ContractError(
+            "process-error skip path is not enabled; named gates still hard-fail"
+        )
+
+
+def light_band_skips_named_control(control: str) -> bool:
+    """Always False: FG-001 seals, adversary, user_approval, digest binding stay required."""
+    del control
+    return False
+
+
+def is_factory_source_rel(rel: str) -> bool:
+    normalized = _normalize_relpath(rel)
+    return normalized == "src/corp_harness" or normalized.startswith("src/corp_harness/")
+
+
+def voided_actors_path(program_root: Path) -> Path:
+    return program_root.expanduser().resolve() / VOIDED_ACTORS_FILE
+
+
+def load_voided_actors(program_root: Path) -> dict[str, Any]:
+    path = voided_actors_path(program_root)
+    if not path.is_file():
+        return {
+            "schema": VOIDED_ACTORS_SCHEMA,
+            "actor_ids": [],
+            "session_ids": [],
+            "packets": [],
+        }
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {
+            "schema": VOIDED_ACTORS_SCHEMA,
+            "actor_ids": [],
+            "session_ids": [],
+            "packets": [],
+        }
+    if not isinstance(raw, dict):
+        return {
+            "schema": VOIDED_ACTORS_SCHEMA,
+            "actor_ids": [],
+            "session_ids": [],
+            "packets": [],
+        }
+    return raw
+
+
+def is_voided_actor(
+    program_root: Path,
+    *,
+    actor_id: str | None = None,
+    session_id: str | None = None,
+) -> bool:
+    body = load_voided_actors(program_root)
+    actors = {str(item) for item in body.get("actor_ids") or [] if item}
+    sessions = {str(item) for item in body.get("session_ids") or [] if item}
+    if actor_id and str(actor_id) in actors:
+        return True
+    if session_id and str(session_id) in sessions:
+        return True
+    return False
+
+
+def void_involved_packets(
+    program_root: Path,
+    *,
+    packets: list[dict[str, Any]],
+    actor_ids: list[str] | None = None,
+    session_ids: list[str] | None = None,
+    reason: str = "covered_skip",
+) -> list[dict[str, Any]]:
+    """Mark involved packets void and persist program-scoped no-rehire ids."""
+    root = program_root.expanduser().resolve()
+    body = load_voided_actors(root)
+    voided: list[dict[str, Any]] = []
+    actors = {str(item) for item in body.get("actor_ids") or [] if item}
+    sessions = {str(item) for item in body.get("session_ids") or [] if item}
+    stored_packets = list(body.get("packets") or [])
+    for packet in packets:
+        marked = dict(packet)
+        marked["void"] = True
+        marked["void_reason"] = reason
+        voided.append(marked)
+        stored_packets.append(marked.get("packet_id") or marked.get("id"))
+        if marked.get("actor_id"):
+            actors.add(str(marked["actor_id"]))
+        if marked.get("session_id"):
+            sessions.add(str(marked["session_id"]))
+    for item in actor_ids or []:
+        if item:
+            actors.add(str(item))
+    for item in session_ids or []:
+        if item:
+            sessions.add(str(item))
+    payload = {
+        "schema": VOIDED_ACTORS_SCHEMA,
+        "actor_ids": sorted(actors),
+        "session_ids": sorted(sessions),
+        "packets": [item for item in stored_packets if item],
+        "reason": reason,
+    }
+    voided_actors_path(root).write_text(
+        json.dumps(payload, indent=2) + "\n", encoding="utf-8"
+    )
+    return voided
+
+
+def reinstate_voided_actor(
+    program_root: Path,
+    *,
+    actor: str,
+    actor_id: str | None = None,
+    session_id: str | None = None,
+) -> dict[str, Any]:
+    if actor != "user":
+        raise ContractError(
+            "unauthorized_actor: reinstating a voided actor requires --actor user"
+        )
+    body = load_voided_actors(program_root)
+    actors = [item for item in body.get("actor_ids") or [] if item != actor_id]
+    sessions = [item for item in body.get("session_ids") or [] if item != session_id]
+    payload = {
+        "schema": VOIDED_ACTORS_SCHEMA,
+        "actor_ids": actors,
+        "session_ids": sessions,
+        "packets": list(body.get("packets") or []),
+        "reason": body.get("reason"),
+        "reinstated_by": "user",
+    }
+    voided_actors_path(program_root).write_text(
+        json.dumps(payload, indent=2) + "\n", encoding="utf-8"
+    )
+    return payload
+
+
+def apply_covered_skip_void(
+    program_root: Path,
+    *,
+    packets: list[dict[str, Any]],
+    covering: bool = False,
+    gate_status: str | None = None,
+    actor_ids: list[str] | None = None,
+    session_ids: list[str] | None = None,
+) -> None:
+    status = (gate_status or "").upper()
+    if not covering and status not in {"SKIP", "COVERED"}:
+        return
+    void_involved_packets(
+        program_root,
+        packets=packets,
+        actor_ids=actor_ids,
+        session_ids=session_ids,
+        reason="covered_skip",
+    )
+    raise ContractError("covering a skipped/failed named gate voids involved packets")
+
+
+def halt_unbind_or_weaken_approval(packet: dict[str, Any]) -> dict[str, Any] | None:
+    """Halt-report success when a packet would unbind the sibling or weaken approval."""
+    if not isinstance(packet, dict):
+        return None
+    flags = (
+        bool(packet.get("unbind_sibling")),
+        bool(packet.get("weaken_adversary")),
+        bool(packet.get("weaken_user_approval")),
+        bool(packet.get("skip_adversary")),
+        bool(packet.get("skip_user_approval")),
+    )
+    blob = json.dumps(packet, default=str).lower()
+    textual = any(
+        needle in blob
+        for needle in (
+            "unbind trust runtime residuals",
+            "unbind sibling",
+            "rewrite .corp-harness-program-root",
+            "skip adversary",
+            "weaken adversary",
+            "weaken user_approval",
+            "skip user_approval",
+            "waive user approval",
+        )
+    )
+    if not any(flags) and not textual:
+        return None
+    return build_halt_report(
+        reason=(
+            "unbind sibling marker or weaken adversary/user approval is forbidden"
+        ),
+        protected_path=".corp-harness-program-root",
+    )
 
 
 def expand_action(action: str) -> str:
@@ -245,6 +495,22 @@ def mutation_permit_path(program_root: Path) -> Path:
 
 def surface_baseline_path(program_root: Path) -> Path:
     return program_root.expanduser().resolve() / "trust-surface-baseline.json"
+
+
+def trust_runtime_lock_path(program_root: Path) -> Path:
+    """Shared exclusive lock for trust-state writes and log append (ACC-FC-LOG-001)."""
+    return program_root.expanduser().resolve() / "trust-runtime.lock"
+
+
+@contextmanager
+def exclusive_trust_runtime_lock(program_root: Path) -> Iterator[None]:
+    """Serialize read-tip + seq assign + append with trust-state writes."""
+    root = program_root.expanduser().resolve()
+    lock_path = trust_runtime_lock_path(root)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+", encoding="utf-8") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        yield
 
 
 def synthesize_trust_state(program_digest: str) -> TrustState:
@@ -353,50 +619,51 @@ def save_trust_state(program_root: Path, state: TrustState) -> None:
     root = program_root.expanduser().resolve()
     path = trust_state_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path = path.with_suffix(path.suffix + ".lock")
-    with lock_path.open("a+", encoding="utf-8") as lock:
-        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-        current_generation = 0
-        if path.exists():
-            try:
-                current = json.loads(path.read_text(encoding="utf-8"))
-                current_generation = int(current.get("generation", 0) or 0)
-            except (
-                AttributeError,
-                OSError,
-                TypeError,
-                ValueError,
-                json.JSONDecodeError,
-            ) as exc:
+    with exclusive_trust_runtime_lock(root):
+        lock_path = path.with_suffix(path.suffix + ".lock")
+        with lock_path.open("a+", encoding="utf-8") as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            current_generation = 0
+            if path.exists():
+                try:
+                    current = json.loads(path.read_text(encoding="utf-8"))
+                    current_generation = int(current.get("generation", 0) or 0)
+                except (
+                    AttributeError,
+                    OSError,
+                    TypeError,
+                    ValueError,
+                    json.JSONDecodeError,
+                ) as exc:
+                    raise ContractError(
+                        f"cannot compare trust-state generation: {exc}"
+                    ) from exc
+            if current_generation != state.generation:
                 raise ContractError(
-                    f"cannot compare trust-state generation: {exc}"
-                ) from exc
-        if current_generation != state.generation:
-            raise ContractError(
-                "trust-state changed concurrently; reload before recording new state"
-            )
-        next_generation = state.generation + 1
-        payload = state.to_dict()
-        payload["generation"] = next_generation
-        temporary_name: str | None = None
-        try:
-            with tempfile.NamedTemporaryFile(
-                "w",
-                encoding="utf-8",
-                dir=path.parent,
-                prefix=f".{path.name}.",
-                delete=False,
-            ) as temporary:
-                temporary_name = temporary.name
-                json.dump(payload, temporary, indent=2, sort_keys=True)
-                temporary.write("\n")
-                temporary.flush()
-                os.fsync(temporary.fileno())
-            os.replace(temporary_name, path)
-            state.generation = next_generation
-        finally:
-            if temporary_name and Path(temporary_name).exists():
-                Path(temporary_name).unlink()
+                    "trust-state changed concurrently; reload before recording new state"
+                )
+            next_generation = state.generation + 1
+            payload = state.to_dict()
+            payload["generation"] = next_generation
+            temporary_name: str | None = None
+            try:
+                with tempfile.NamedTemporaryFile(
+                    "w",
+                    encoding="utf-8",
+                    dir=path.parent,
+                    prefix=f".{path.name}.",
+                    delete=False,
+                ) as temporary:
+                    temporary_name = temporary.name
+                    json.dump(payload, temporary, indent=2, sort_keys=True)
+                    temporary.write("\n")
+                    temporary.flush()
+                    os.fsync(temporary.fileno())
+                os.replace(temporary_name, path)
+                state.generation = next_generation
+            finally:
+                if temporary_name and Path(temporary_name).exists():
+                    Path(temporary_name).unlink()
 
 
 def validate_event_preconditions(
@@ -405,6 +672,10 @@ def validate_event_preconditions(
     theater_signal_id: str | None,
     reasons: list[str],
 ) -> None:
+    if kind in PROCESS_ERROR_LABELS:
+        raise ContractError(
+            "process-error skip path is not enabled; named gates still hard-fail"
+        )
     if kind not in TRUST_EVENT_KINDS:
         raise ContractError(f"unknown TrustEvent kind: {kind!r}")
     if kind == "deceptive_theater":
@@ -861,47 +1132,54 @@ def append_trust_log_entry(
     program_id: str | None = None,
 ) -> dict[str, Any]:
     """Sole append writer for trust-event-log.jsonl. Mints anchor on first append."""
+    if entry_kind in LEGACY_LOG_ENTRY_KINDS:
+        raise ContractError(
+            f"{entry_kind} is not writable; score restore via wipe/rebind/amnesty is forbidden"
+        )
     if entry_kind not in LOG_ENTRY_KINDS:
         raise ContractError(f"unknown trust log entry_kind: {entry_kind!r}")
     root = program_root.expanduser().resolve()
     log_path = trust_event_log_path(root)
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path = log_path.with_suffix(log_path.suffix + ".lock")
-    with lock_path.open("a+", encoding="utf-8") as lock:
-        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-        existing = read_trust_log_entries(root)
-        if existing:
-            prev_hash = str(existing[-1].get("entry_hash") or "")
-            if not prev_hash:
-                raise ContractError("trust-event-log tip missing entry_hash")
-            seq = int(existing[-1].get("seq") or len(existing)) + 1
-        else:
-            prev_hash = GENESIS_PREV_HASH
-            seq = 1
-        recorded_at = _now()
-        body: dict[str, Any] = {
-            "schema": TRUST_LOG_ENTRY_SCHEMA,
-            "seq": seq,
-            "entry_kind": entry_kind,
-            "prev_hash": prev_hash,
-            "program_digest": program_digest,
-            "recorded_at": recorded_at,
-            "payload": payload,
-        }
-        entry_hash = canonical_log_entry_hash(body)
-        entry = {**body, "entry_hash": entry_hash}
-        with log_path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(entry, sort_keys=True, separators=(",", ":")) + "\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        if seq == 1:
-            _mint_trust_log_anchor(
-                root,
-                program_id=program_id or _program_id(root),
-                first_entry_hash=entry_hash,
-                initialized_at=recorded_at,
-            )
-        return entry
+    with exclusive_trust_runtime_lock(root):
+        lock_path = log_path.with_suffix(log_path.suffix + ".lock")
+        with lock_path.open("a+", encoding="utf-8") as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            existing = read_trust_log_entries(root)
+            if existing:
+                prev_hash = str(existing[-1].get("entry_hash") or "")
+                if not prev_hash:
+                    raise ContractError("trust-event-log tip missing entry_hash")
+                seq = int(existing[-1].get("seq") or len(existing)) + 1
+            else:
+                prev_hash = GENESIS_PREV_HASH
+                seq = 1
+            recorded_at = _now()
+            body: dict[str, Any] = {
+                "schema": TRUST_LOG_ENTRY_SCHEMA,
+                "seq": seq,
+                "entry_kind": entry_kind,
+                "prev_hash": prev_hash,
+                "program_digest": program_digest,
+                "recorded_at": recorded_at,
+                "payload": payload,
+            }
+            entry_hash = canonical_log_entry_hash(body)
+            entry = {**body, "entry_hash": entry_hash}
+            with log_path.open("a", encoding="utf-8") as handle:
+                handle.write(
+                    json.dumps(entry, sort_keys=True, separators=(",", ":")) + "\n"
+                )
+                handle.flush()
+                os.fsync(handle.fileno())
+            if seq == 1:
+                _mint_trust_log_anchor(
+                    root,
+                    program_id=program_id or _program_id(root),
+                    first_entry_hash=entry_hash,
+                    initialized_at=recorded_at,
+                )
+            return entry
 
 
 def _mint_trust_log_anchor(
@@ -922,6 +1200,22 @@ def _mint_trust_log_anchor(
         "writer": SOLE_EMITTER,
     }
     path.write_text(json.dumps(anchor, indent=2) + "\n", encoding="utf-8")
+
+
+def _program_kind(program_root: Path) -> str | None:
+    path = program_root.expanduser().resolve() / "program.json"
+    if not path.is_file():
+        return None
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(raw, dict):
+        return None
+    kind = raw.get("program_kind")
+    if isinstance(kind, str) and kind.strip():
+        return kind.strip()
+    return "product"
 
 
 def _program_id(program_root: Path) -> str:
@@ -1271,7 +1565,7 @@ def load_factory_hooks_config(factory_root: Path | None = None) -> dict[str, Any
 
 
 def required_hooks_intact(factory_root: Path | None = None) -> bool:
-    """True when required afterFileEdit + beforeShellExecution hooks are present."""
+    """True when required preToolUse + afterFileEdit + beforeShellExecution hooks exist."""
     factory = (factory_root or factory_checkout_root()).expanduser().resolve()
     cfg = load_factory_hooks_config(factory)
     if cfg is None:
@@ -1593,6 +1887,201 @@ def authorize_paths_with_permit(
     return True
 
 
+def load_active_write_set(program_root: Path) -> tuple[str, ...]:
+    """Load sealed packet write_set from env packet path or corporate file."""
+    root = program_root.expanduser().resolve()
+    candidates: list[Path] = []
+    env = os.environ.get(ACTIVE_PACKET_ENV, "").strip()
+    if env:
+        candidates.append(Path(env).expanduser())
+    candidates.append(root / ACTIVE_WRITE_SET_FILE)
+    for path in candidates:
+        if not path.is_file():
+            continue
+        try:
+            body = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(body, dict):
+            continue
+        raw = body.get("write_set")
+        if not isinstance(raw, list):
+            continue
+        cleaned = tuple(
+            _normalize_relpath(item)
+            for item in raw
+            if isinstance(item, str) and item.strip()
+        )
+        if cleaned:
+            return cleaned
+    return ()
+
+
+def write_set_covers_path(rel: str, write_set: tuple[str, ...]) -> bool:
+    normalized = _normalize_relpath(rel)
+    for surface in write_set:
+        prefix = surface.rstrip("/")
+        if not prefix:
+            continue
+        if normalized == prefix or normalized.startswith(prefix + "/"):
+            return True
+    return False
+
+
+def path_covered_for_pretooluse(
+    program_root: Path,
+    rel: str,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    """True when a live mutation permit or active packet write_set covers rel."""
+    if authorize_paths_with_permit(program_root, paths=[rel], now=now):
+        return True
+    return write_set_covers_path(rel, load_active_write_set(program_root))
+
+
+def hooks_config_has_pretooluse(config: dict[str, Any] | None) -> bool:
+    if not isinstance(config, dict):
+        return False
+    hooks = config.get("hooks")
+    if not isinstance(hooks, dict):
+        return False
+    entries = hooks.get("preToolUse")
+    if not isinstance(entries, list) or not entries:
+        return False
+    return any(
+        isinstance(entry, dict) and str(entry.get("command") or "").strip()
+        for entry in entries
+    )
+
+
+def afterfileedit_only_hooks(config: dict[str, Any] | None) -> bool:
+    """True when afterFileEdit exists and preToolUse does not (ACC-FC-001 fail)."""
+    if not isinstance(config, dict):
+        return False
+    hooks = config.get("hooks")
+    if not isinstance(hooks, dict):
+        return False
+    after = hooks.get("afterFileEdit")
+    has_after = isinstance(after, list) and any(
+        isinstance(entry, dict) and str(entry.get("command") or "").strip()
+        for entry in after
+    )
+    return has_after and not hooks_config_has_pretooluse(config)
+
+
+def build_halt_report(
+    *,
+    reason: str,
+    protected_path: str,
+    legal_next: tuple[str, ...] = LEGAL_NEXT_COMMANDS,
+) -> dict[str, Any]:
+    """Schema-valid successful halt (refuse illegal edit; digests unchanged)."""
+    return {
+        "schema": HALT_REPORT_SCHEMA,
+        "verdict": "halt_report",
+        "ok": True,
+        "reason": reason,
+        "protected_path": protected_path,
+        "legal_next": list(legal_next),
+        "digests_unchanged": True,
+    }
+
+
+def extract_pretooluse_paths(payload: dict[str, Any]) -> list[str]:
+    tool_input = payload.get("tool_input")
+    blob = tool_input if isinstance(tool_input, dict) else payload
+    paths: list[str] = []
+    for key in ("path", "file_path", "target_file", "target_notebook"):
+        value = blob.get(key) if isinstance(blob, dict) else None
+        if not value:
+            value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            paths.append(value.strip())
+    return paths
+
+
+def evaluate_pretooluse(
+    factory_root: Path,
+    program_root: Path | None,
+    payload: dict[str, Any],
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Decide preToolUse allow/deny. Deny is halt_report success (no digest writes)."""
+    if program_root is None:
+        return {"permission": "allow"}
+    tool = str(payload.get("tool_name") or payload.get("tool") or "")
+    paths = extract_pretooluse_paths(payload)
+    if tool and tool not in PRETOOLUSE_WRITE_TOOLS and tool not in {"Shell", "Bash"}:
+        return {"permission": "allow"}
+    findings: list[str] = []
+    factory = factory_root.expanduser().resolve()
+    root = program_root.expanduser().resolve()
+    for file_path in paths:
+        path = Path(file_path).expanduser()
+        if not path.is_absolute():
+            path = (factory / path).resolve()
+        else:
+            path = path.resolve()
+        factory_rel = None
+        try:
+            factory_rel = path.relative_to(factory).as_posix()
+        except ValueError:
+            factory_rel = None
+        corp_rel = None
+        try:
+            corp_rel = path.relative_to(root).as_posix()
+        except ValueError:
+            corp_rel = None
+        rel = factory_rel or corp_rel
+        if rel is None:
+            continue
+        if factory_rel and is_factory_source_rel(factory_rel):
+            kind = _program_kind(root)
+            if kind == "product":
+                findings.append(factory_rel)
+                continue
+        protected = False
+        if factory_rel and (
+            is_factory_d8_path(factory_rel)
+            or _normalize_relpath(factory_rel) == PROGRAM_ROOT_MARKER
+            or _normalize_relpath(factory_rel).startswith("src/corp_harness/")
+            or _normalize_relpath(factory_rel).startswith("scripts/harness/")
+        ):
+            protected = True
+            rel = factory_rel
+        elif corp_rel and is_corporate_protected_path(corp_rel):
+            protected = True
+            rel = corp_rel
+        if not protected:
+            continue
+        if path_covered_for_pretooluse(root, rel, now=now):
+            continue
+        findings.append(rel)
+    if not findings:
+        return {"permission": "allow"}
+    protected_path = findings[0]
+    halt = build_halt_report(
+        reason=f"preToolUse deny: {protected_path} not covered by permit or write_set",
+        protected_path=protected_path,
+    )
+    legal = "; ".join(LEGAL_NEXT_COMMANDS)
+    return {
+        "permission": "deny",
+        "user_message": (
+            f"Write to {protected_path} denied. Legal next: {legal} (or halt_report)."
+        ),
+        "agent_message": (
+            f"preToolUse denied {protected_path}. Legal next: {legal}. "
+            "verdict=halt_report; digests unchanged."
+        ),
+        "halt_report": halt,
+        "legal_next": list(LEGAL_NEXT_COMMANDS),
+        "verdict": "halt_report",
+    }
+
+
 def _file_digest(path: Path) -> str | None:
     if not path.is_file():
         return None
@@ -1603,8 +2092,16 @@ def _relative_posix(path: Path, root: Path) -> str:
     return path.resolve().relative_to(root.resolve()).as_posix()
 
 
+def _normalize_relpath(rel: str) -> str:
+    """Strip a leading ./ prefix without treating '.' as a character class."""
+    normalized = rel.replace("\\", "/").strip()
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    return normalized
+
+
 def is_factory_d8_path(rel: str) -> bool:
-    normalized = rel.lstrip("./")
+    normalized = _normalize_relpath(rel)
     if normalized in FACTORY_D8_FILES or normalized == ".cursor":
         return True
     if normalized.startswith(".cursor/"):
@@ -1614,11 +2111,76 @@ def is_factory_d8_path(rel: str) -> bool:
 
 def is_generated_d8_noise(rel: str) -> bool:
     """Build/cache artifacts are not D8 OOB for a live factory working tree."""
-    normalized = rel.lstrip("./")
+    normalized = _normalize_relpath(rel)
     parts = Path(normalized).parts
     if "__pycache__" in parts or ".build" in parts:
         return True
     return normalized.endswith(".pyc") or normalized.endswith(".pyo")
+
+
+def _normalize_factory_surface(surface: str) -> str:
+    return _normalize_relpath(surface).rstrip("/")
+
+
+def factory_rel_in_authorized_surfaces(rel: str, surfaces: frozenset[str]) -> bool:
+    normalized = _normalize_relpath(rel)
+    for surface in surfaces:
+        prefix = _normalize_factory_surface(surface)
+        if not prefix:
+            continue
+        if normalized == prefix or normalized.startswith(prefix + "/"):
+            return True
+    return False
+
+
+def load_authorized_factory_surfaces(program_root: Path | None) -> frozenset[str] | None:
+    """Return FA authorized_surfaces, or None when factory D8 prefixes must not be scanned.
+
+    Genesis / missing factory_authorization: do not walk the live factory tree.
+    Only FACTORY_D8_FILES participate until the user records authorization.
+    """
+    if program_root is None:
+        return None
+    path = program_root.expanduser().resolve() / "program.json"
+    if not path.is_file():
+        return None
+    try:
+        program = Program.load(path)
+    except (OSError, ContractError, ValueError, TypeError, json.JSONDecodeError):
+        return None
+    artifact = program.artifacts.get("factory_authorization")
+    if artifact is None:
+        return None
+    fa_path = Path(artifact.path)
+    if not fa_path.is_file():
+        return None
+    try:
+        body = json.loads(fa_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return None
+    raw = body.get("authorized_surfaces")
+    if not isinstance(raw, list):
+        return None
+    cleaned = [
+        _normalize_factory_surface(item)
+        for item in raw
+        if isinstance(item, str) and item.strip()
+    ]
+    return frozenset(cleaned) if cleaned else None
+
+
+def factory_rel_in_d8_scan_scope(rel: str, allowed: frozenset[str] | None) -> bool:
+    """Whether a factory-relative path is in this program's dirty-scan scope."""
+    if is_generated_d8_noise(rel):
+        return False
+    normalized = _normalize_relpath(rel)
+    if allowed is None:
+        return (
+            normalized in FACTORY_D8_FILES
+            or normalized == ".cursor"
+            or normalized.startswith(".cursor/")
+        )
+    return factory_rel_in_authorized_surfaces(normalized, allowed)
 
 
 def is_corporate_protected_path(rel: str) -> bool:
@@ -1643,31 +2205,56 @@ def collect_corporate_protected_digests(program_root: Path) -> dict[str, str]:
     return digests
 
 
-def collect_factory_d8_digests(factory_root: Path) -> dict[str, str]:
+def collect_factory_d8_digests(
+    factory_root: Path,
+    *,
+    program_root: Path | None = None,
+) -> dict[str, str]:
     factory = factory_root.expanduser().resolve()
+    allowed = load_authorized_factory_surfaces(program_root)
     digests: dict[str, str] = {}
     for name in sorted(FACTORY_D8_FILES):
         path = factory / name
-        if path.is_file():
+        if path.is_file() and factory_rel_in_d8_scan_scope(name, allowed):
             digests[name] = digest_path(path)
+    if allowed is None:
+        cursor = factory / ".cursor"
+        if cursor.is_dir():
+            for path in sorted(cursor.rglob("*")):
+                if path.is_file():
+                    rel = _relative_posix(path, factory)
+                    if factory_rel_in_d8_scan_scope(rel, allowed):
+                        digests[rel] = digest_path(path)
+        return digests
     for prefix in FACTORY_D8_PREFIXES:
+        base_rel = prefix.rstrip("/")
+        if not any(
+            factory_rel_in_authorized_surfaces(base_rel, allowed)
+            or factory_rel_in_authorized_surfaces(surface, frozenset({base_rel}))
+            for surface in allowed
+        ):
+            continue
         base = factory / prefix.rstrip("/")
         if not base.exists():
             continue
         if base.is_file():
-            digests[prefix.rstrip("/")] = digest_path(base)
+            rel = prefix.rstrip("/")
+            if factory_rel_in_d8_scan_scope(rel, allowed):
+                digests[rel] = digest_path(base)
             continue
         for path in sorted(base.rglob("*")):
             if path.is_file():
                 rel = _relative_posix(path, factory)
-                if is_generated_d8_noise(rel):
-                    continue
-                digests[rel] = digest_path(path)
-    cursor = factory / ".cursor"
-    if cursor.is_dir():
-        for path in sorted(cursor.rglob("*")):
-            if path.is_file():
-                digests[_relative_posix(path, factory)] = digest_path(path)
+                if factory_rel_in_d8_scan_scope(rel, allowed):
+                    digests[rel] = digest_path(path)
+    if factory_rel_in_authorized_surfaces(".cursor", allowed):
+        cursor = factory / ".cursor"
+        if cursor.is_dir():
+            for path in sorted(cursor.rglob("*")):
+                if path.is_file():
+                    rel = _relative_posix(path, factory)
+                    if factory_rel_in_d8_scan_scope(rel, allowed):
+                        digests[rel] = digest_path(path)
     return digests
 
 
@@ -1694,7 +2281,9 @@ def update_surface_baseline(
     resolved_factory = None
     if factory_root is not None:
         resolved_factory = factory_root.expanduser().resolve()
-        factory_digests = collect_factory_d8_digests(resolved_factory)
+        factory_digests = collect_factory_d8_digests(
+            resolved_factory, program_root=root
+        )
     payload = {
         "schema": SURFACE_BASELINE_SCHEMA,
         "program_digest": digest_path(root / "program.json"),
@@ -1783,8 +2372,15 @@ def detect_dirty_surfaces(
     *,
     factory_root: Path | None = None,
     now: datetime | None = None,
+    honor_permits: bool = True,
+    honor_mutation_permits: bool = True,
 ) -> list[dict[str, str]]:
-    """Compare protected digests to baseline; honor valid mutation permits."""
+    """Compare protected digests to baseline; optionally honor mutation permits.
+
+    Mutating apply (honor_mutation_permits=False) still honors permits for
+    newly created artifact files, but will not launder pre-existing baseline
+    mutations (ACC-FC-DENY-002).
+    """
     root = program_root.expanduser().resolve()
     findings = detect_false_genesis_signals(root)
     baseline = load_surface_baseline(root)
@@ -1793,13 +2389,20 @@ def detect_dirty_surfaces(
     raw_corporate = baseline.get("corporate")
     corporate_base = raw_corporate if isinstance(raw_corporate, dict) else {}
     current_corporate = collect_corporate_protected_digests(root)
+
+    def _permitted(rel: str, *, mutation: bool) -> bool:
+        if mutation and not honor_mutation_permits:
+            return False
+        return honor_permits and authorize_paths_with_permit(
+            root, paths=[rel], now=now
+        )
     for rel, prior in corporate_base.items():
         if rel == "trust-surface-baseline.json":
             continue
         current = current_corporate.get(rel)
         if current == prior:
             continue
-        if authorize_paths_with_permit(root, paths=[rel], now=now):
+        if _permitted(rel, mutation=True):
             continue
         findings.append(
             {
@@ -1814,7 +2417,7 @@ def detect_dirty_surfaces(
         # Baseline file is writer-owned bookkeeping, not an OOB signal.
         if rel == "trust-surface-baseline.json":
             continue
-        if authorize_paths_with_permit(root, paths=[rel], now=now):
+        if _permitted(rel, mutation=False):
             continue
         findings.append(
             {
@@ -1827,14 +2430,15 @@ def detect_dirty_surfaces(
         return findings
     factory = factory_root.expanduser().resolve()
     factory_base = baseline.get("factory") if isinstance(baseline.get("factory"), dict) else {}
-    current_factory = collect_factory_d8_digests(factory)
+    allowed = load_authorized_factory_surfaces(root)
+    current_factory = collect_factory_d8_digests(factory, program_root=root)
     for rel, prior in factory_base.items():
-        if is_generated_d8_noise(rel):
+        if not factory_rel_in_d8_scan_scope(rel, allowed):
             continue
         current = current_factory.get(rel)
         if current == prior:
             continue
-        if authorize_paths_with_permit(root, paths=[rel], now=now):
+        if _permitted(rel, mutation=True):
             continue
         findings.append(
             {
@@ -1846,9 +2450,9 @@ def detect_dirty_surfaces(
     for rel, current in current_factory.items():
         if rel in factory_base:
             continue
-        if is_generated_d8_noise(rel):
+        if not factory_rel_in_d8_scan_scope(rel, allowed):
             continue
-        if authorize_paths_with_permit(root, paths=[rel], now=now):
+        if _permitted(rel, mutation=False):
             continue
         if not is_factory_d8_path(rel):
             continue
@@ -1994,9 +2598,20 @@ def run_deferred_dirty_scan(
                 "trust_score": float(state.trust_score),
             }
         )
+        if force:
+            raise ContractError(
+                "wrong_root_operation: CLI root "
+                f"{root} != bound program root {bound} (env>marker)"
+            )
         return {"ok": False, "dirty": True, "reported": reported, "skipped": False}
 
-    findings = detect_dirty_surfaces(root, factory_root=factory, now=now)
+    findings = detect_dirty_surfaces(
+        root,
+        factory_root=factory,
+        now=now,
+        honor_permits=True,
+        honor_mutation_permits=not force,
+    )
     unbind_bypass = (
         classify_unbind_program_root_seal_bypass(root, factory_root=factory)
         if factory is not None
@@ -2055,12 +2670,19 @@ def run_deferred_dirty_scan(
                 "trust_score": float(state.trust_score),
             }
         )
-    return {
+    result = {
         "ok": not reported,
         "dirty": bool(reported),
         "reported": reported,
         "skipped": False,
     }
+    if force and any(
+        item.get("theater_signal_id") == "out_of_band_mutation" for item in reported
+    ):
+        raise ContractError(
+            "unsigned or preToolUse-bypassed work cannot finish/advance"
+        )
+    return result
 
 
 def authorized_apply_with_permit(

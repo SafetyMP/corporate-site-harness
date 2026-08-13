@@ -39,6 +39,21 @@ def escalation(task_class: str = "hard_implement") -> dict:
     }
 
 
+def _sealed(packet: dict, **overrides: object) -> dict:
+    sealed = {
+        "role": "site-specialist",
+        "packet_id": "WP-TEST",
+        "root": "/tmp/site",
+        "write_set": ["src/corp_harness/cli.py"],
+        "routed_model": str(packet.get("model_id") or "composer-2.5"),
+        "success_schema": "pytest exit 0",
+        "halt_conditions": ["Would treat Sol as ceiling bypass"],
+        **packet,
+        **overrides,
+    }
+    return sealed
+
+
 def test_default_policy_validates() -> None:
     policy = validate_execution_policy(default_execution_policy())
     assert policy["schema"].endswith("/v1")
@@ -120,19 +135,23 @@ def test_attest_fable_alias_is_premium() -> None:
 
 
 def test_packet_attestation_fixture_paths() -> None:
-    bad = {
-        "model_id": "gpt-5.6-sol-max",
-        "model_class": "premium",
-        "task_class": "evidence_recapture",
-        "max_mode": True,
-    }
-    good = {
-        "model_id": "gpt-5.6-sol-max",
-        "model_class": "premium",
-        "task_class": "hard_implement",
-        "max_mode": True,
-        "escalation": escalation(),
-    }
+    bad = _sealed(
+        {
+            "model_id": "gpt-5.6-sol-max",
+            "model_class": "premium",
+            "task_class": "evidence_recapture",
+            "max_mode": True,
+        }
+    )
+    good = _sealed(
+        {
+            "model_id": "gpt-5.6-sol-max",
+            "model_class": "premium",
+            "task_class": "hard_implement",
+            "max_mode": True,
+            "escalation": escalation(),
+        }
+    )
     assert validate_packet_attestation(bad)["ok"] is False
     assert validate_packet_attestation(good)["ok"] is True
 
@@ -187,11 +206,13 @@ def test_cli_route_model_and_attest(tmp_path: Path) -> None:
     packet_path = root / "bad-packet.json"
     packet_path.write_text(
         json.dumps(
-            {
-                "model_id": "gpt-5.6-sol-max",
-                "model_class": "premium",
-                "task_class": "evidence_recapture",
-            }
+            _sealed(
+                {
+                    "model_id": "gpt-5.6-sol-max",
+                    "model_class": "premium",
+                    "task_class": "evidence_recapture",
+                }
+            )
         )
         + "\n",
         encoding="utf-8",
@@ -216,12 +237,14 @@ def test_cli_route_model_and_attest(tmp_path: Path) -> None:
     good = root / "good-packet.json"
     good.write_text(
         json.dumps(
-            {
-                "model_id": "gpt-5.6-sol-max",
-                "model_class": "premium",
-                "task_class": "hard_implement",
-                "escalation": escalation(),
-            }
+            _sealed(
+                {
+                    "model_id": "gpt-5.6-sol-max",
+                    "model_class": "premium",
+                    "task_class": "hard_implement",
+                    "escalation": escalation(),
+                }
+            )
         )
         + "\n",
         encoding="utf-8",

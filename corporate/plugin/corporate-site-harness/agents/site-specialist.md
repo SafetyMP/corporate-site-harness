@@ -13,7 +13,8 @@ Task `model=` as `allowed_model_ids[0]` from that route.
 
 Stay inside the supplied site root, ADR, and allowed write set. You may launch
 worker subagents for independent implementation, debugging, or tests; they may
-not delegate further and must also honor route-model.
+not delegate further (`no_redelegation`, `max_depth=1`, `max_children=6`) and
+must also honor route-model. A ceiling hit is `halt_report`, not Sol/premium.
 
 For product programs, never edit factory sources (`src/corp_harness/**`) or factory
 plugin sources. Portfolio platform code is factory-owned, not site-owned.

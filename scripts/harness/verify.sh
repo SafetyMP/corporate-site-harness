@@ -25,6 +25,14 @@ REQUIRED_FC_TESTS=(
   test_FC_RECOVER_001_user_apply_allows_record
   test_FC_LOG_001_concurrent_append_unique_seq
   test_FC_SCAN_001_pyc_build_not_oob_without_fa
+  test_FC_INCIDENT_001_chain_incident_r1_fixture_and_verify_required_collect
+  test_FC_SPLIT_001_reviewer_requires_fresh_task
+  test_FC_SPLIT_002_prompt_packet_digests_oracle_only
+  test_FC_SPLIT_003_child_prose_not_evidence
+  test_FC_COL_001_cover_skip_voids_packets
+  test_FC_COL_002_producer_cannot_record_own_gate
+  test_FC_COL_003_voided_actor_no_rehire_until_user
+  test_FC_SEC_HALT_001_unbind_sibling_or_weaken_approval_halt_report
 )
 
 # ADR-TR-003 / G-TR-AH-CORE + G-TR-AH-BYPASS (WP-TR-AH-C).
@@ -147,7 +155,7 @@ ensure_program_root_binding
 # Scrub inherited bind env so pytest tmp fixtures remain authoritative.
 unset CORP_HARNESS_PROGRAM_ROOT || true
 
-collected="$(python3 -m pytest --collect-only -q tests/test_trust_runtime.py tests/test_site_gate_oracles.py)"
+collected="$(python3 -m pytest --collect-only -q tests/test_trust_runtime.py tests/test_site_gate_oracles.py tests/test_fail_closed.py)"
 for name in "${REQUIRED_LOG_TESTS[@]}" "${REQUIRED_AH_TESTS[@]}" "${REQUIRED_TRR_TESTS[@]}" "${REQUIRED_SGO_TESTS[@]}" "${REQUIRED_FC_TESTS[@]}"; do
   if ! grep -q "::${name}$" <<<"${collected}"; then
     echo "verify.sh: missing collected test: ${name}" >&2
