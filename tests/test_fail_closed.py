@@ -20,12 +20,13 @@ from corp_harness.contracts import (
 )
 from corp_harness.evidence import SAFE_ENV_KEYS, run_evidence
 from corp_harness.execution_policy import (
-    DENIAL_BUDGET_HARD,
     DENIAL_CHILD_PROSE_EVIDENCE,
+    DENIAL_PREMIUM_MODEL_POLICY,
     DENIAL_SAME_SESSION_REVIEWER,
     DENIAL_SEALED_WORK_ORDER,
     DENIAL_SUBCONTRACTOR_CEILING,
     DENIAL_VOIDED_ACTOR,
+    attest_model_use,
     collect_admissible_gate_packets,
     default_execution_policy,
     route_model,
@@ -516,25 +517,36 @@ def test_FC_004_subcontractor_ceilings_halt() -> None:
 
 
 def test_FC_004_premium_not_ceiling_bypass() -> None:
+    # Remediate without escalation stays standard; Sol is not a ceiling bypass.
     failed = route_model(
         role="site-specialist",
         task_class="remediate",
         failed_standard_attempts=9,
     )
-    assert failed["model_class"] != "premium"
+    assert failed["model_class"] == "standard"
     assert not any("sol" in item.lower() for item in failed["allowed_model_ids"])
 
-    policy = default_execution_policy()
-    policy["budget"]["recorded_premium_usd"] = policy["budget"]["premium_usd_hard"]
+    refused = attest_model_use(
+        model_id="gpt-5.6-sol-max",
+        model_class="premium",
+        task_class="remediate",
+        failed_standard_attempts=9,
+    )
+    assert refused["ok"] is False
+    assert refused["denial_code"] == DENIAL_PREMIUM_MODEL_POLICY
+
+    # USD hard-stop removed: hard_implement still routes premium+escalation
+    # required; denial is never PREMIUM_BUDGET_HARD.
     hard = route_model(
         role="site-specialist",
         task_class="hard_implement",
-        policy=policy,
+        policy=default_execution_policy(),
         packet=_sealed_packet(),
     )
-    assert hard["model_class"] != "premium"
-    assert hard["denial_code"] == DENIAL_BUDGET_HARD
-    assert not any("sol" in item.lower() for item in hard["allowed_model_ids"])
+    assert hard["model_class"] == "premium"
+    assert hard["requires_escalation"] is True
+    assert hard.get("denial_code") is None
+    assert hard.get("denial_code") != "PREMIUM_BUDGET_HARD"
 
 
 def test_FC_005_light_band_no_gate_skip(tmp_path: Path) -> None:

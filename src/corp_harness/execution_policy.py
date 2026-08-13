@@ -21,7 +21,6 @@ PACKET_ATTEST_SCHEMA = "corporate-site-packet-model-attestation/v1"
 
 DENIAL_PREMIUM_MODEL_POLICY = "PREMIUM_MODEL_POLICY"
 DENIAL_EVIDENCE_STALE = "EVIDENCE_MAX_AGE_EXCEEDED"
-DENIAL_BUDGET_HARD = "PREMIUM_BUDGET_HARD"
 DENIAL_SEALED_WORK_ORDER = "SEALED_WORK_ORDER_REQUIRED"
 DENIAL_SUBCONTRACTOR_CEILING = "SUBCONTRACTOR_CEILING"
 DENIAL_SAME_SESSION_REVIEWER = "REVIEWER_SAME_SESSION"
@@ -116,15 +115,20 @@ DEFAULT_MODEL_ALIASES = {
         "claude-4.5-fable",
     ],
     # First ID is the launch default (allowed_model_ids[0]).
+    # Grok 4.6 is fast/standard only — never premium (Sol/Fable alone).
     "standard": [
         "composer-2.5",
         "composer-2",
+        "cursor-grok-4.6-high-fast",
+        "grok-4.6",
         "grok-4.5",
         "cursor-grok-4.5-high-fast",
         "gpt-5.6-luna-medium",
         "gpt-5.6-terra-medium",
     ],
     "fast": [
+        "cursor-grok-4.6-high-fast",
+        "grok-4.6",
         "cursor-grok-4.5-high-fast",
         "grok-4.5",
         "composer-2.5-fast",
@@ -161,6 +165,20 @@ KNOWN_POLICY_KEYS = frozenset(
     }
 )
 
+# Escalation artifacts must not carry USD/invoice control fields (TPC-MODEL-001).
+ESCALATION_FORBIDDEN_DOLLAR_KEYS = frozenset(
+    {
+        "premium_usd",
+        "amount_usd",
+        "invoice",
+        "recorded_premium_usd",
+        "premium_usd_soft",
+        "premium_usd_hard",
+        "total_premium_usd",
+        "budget",
+    }
+)
+
 
 def default_execution_policy() -> dict[str, Any]:
     return {
@@ -168,12 +186,8 @@ def default_execution_policy() -> dict[str, Any]:
         "model_aliases": {key: list(value) for key, value in DEFAULT_MODEL_ALIASES.items()},
         "task_class_defaults": dict(DEFAULT_TASK_CLASS_DEFAULTS),
         "premium_allowlist": sorted(DEFAULT_PREMIUM_ALLOWLIST),
-        "budget": {
-            "premium_usd_soft": 500.0,
-            "premium_usd_hard": 1500.0,
-            "currency": "USD",
-            "recorded_premium_usd": 0.0,
-        },
+        # Budget USD hard-stops removed from control surface (TPC-CUT-002).
+        "budget": {},
         "evidence_max_age_seconds": 300,
         "packet_limits": dict(DEFAULT_PACKET_LIMITS),
         "subcontractor_ceilings": dict(DEFAULT_SUBCONTRACTOR_CEILINGS),
@@ -237,18 +251,9 @@ def validate_execution_policy(raw: Any) -> dict[str, Any]:
         budget = raw["budget"]
         if not isinstance(budget, dict):
             raise ContractError("budget must be an object")
-        for key in ("premium_usd_soft", "premium_usd_hard", "recorded_premium_usd"):
-            if key in budget:
-                value = budget[key]
-                if not isinstance(value, (int, float)) or isinstance(value, bool) or value < 0:
-                    raise ContractError(f"budget.{key} must be a non-negative number")
-                policy["budget"][key] = float(value)
-        if policy["budget"]["premium_usd_soft"] > policy["budget"]["premium_usd_hard"]:
-            raise ContractError("budget.premium_usd_soft must be <= premium_usd_hard")
-        currency = budget.get("currency", policy["budget"]["currency"])
-        if not isinstance(currency, str) or not currency.strip():
-            raise ContractError("budget.currency must be a nonempty string")
-        policy["budget"]["currency"] = currency.strip()
+        # Accept legacy budget objects as non-gating telemetry only; USD hard/soft
+        # keys are ignored for route/attest/check deny decisions.
+        policy["budget"] = dict(budget)
 
     if "evidence_max_age_seconds" in raw:
         age = raw["evidence_max_age_seconds"]
@@ -350,6 +355,15 @@ def _packet_complexity(packet: dict[str, Any] | None, policy: dict[str, Any]) ->
     return bool(packet.get("hard_implement") or packet.get("requires_premium"))
 
 
+def _escalation_has_dollar_fields(escalation: dict[str, Any]) -> bool:
+    for key in escalation:
+        if key in ESCALATION_FORBIDDEN_DOLLAR_KEYS:
+            return True
+        if key == "currency" and str(escalation.get(key) or "").strip().upper() == "USD":
+            return True
+    return False
+
+
 def _escalation_valid(escalation: dict[str, Any] | None, task_class: str) -> bool:
     if not escalation:
         return False
@@ -359,7 +373,13 @@ def _escalation_valid(escalation: dict[str, Any] | None, task_class: str) -> boo
         return False
     if escalation.get("task_class") not in {task_class, "hard_implement"}:
         return False
-    if not escalation.get("reason"):
+    reason = escalation.get("reason")
+    if not isinstance(reason, str) or not reason.strip():
+        return False
+    esc_id = escalation.get("id")
+    if not isinstance(esc_id, str) or not esc_id.strip():
+        return False
+    if _escalation_has_dollar_fields(escalation):
         return False
     return True
 
@@ -537,13 +557,6 @@ def route_model(
             "halt_report": halt,
             "reasons": [halt["reason"]],
             "denial_code": None,
-            "budget": {
-                "state": "ok",
-                "recorded_premium_usd": resolved["budget"]["recorded_premium_usd"],
-                "premium_usd_soft": resolved["budget"]["premium_usd_soft"],
-                "premium_usd_hard": resolved["budget"]["premium_usd_hard"],
-                "currency": resolved["budget"]["currency"],
-            },
         }
 
     void_root = None
@@ -571,13 +584,6 @@ def route_model(
                     "voided actor_id/session_id cannot be redispatched until user reinstate"
                 ],
                 "denial_code": DENIAL_VOIDED_ACTOR,
-                "budget": {
-                    "state": "ok",
-                    "recorded_premium_usd": resolved["budget"]["recorded_premium_usd"],
-                    "premium_usd_soft": resolved["budget"]["premium_usd_soft"],
-                    "premium_usd_hard": resolved["budget"]["premium_usd_hard"],
-                    "currency": resolved["budget"]["currency"],
-                },
             }
 
     ceiling_reasons = _subcontractor_ceiling_reasons(packet, resolved)
@@ -598,13 +604,6 @@ def route_model(
             "halt_report": halt,
             "reasons": ceiling_reasons,
             "denial_code": DENIAL_SUBCONTRACTOR_CEILING,
-            "budget": {
-                "state": "ok",
-                "recorded_premium_usd": resolved["budget"]["recorded_premium_usd"],
-                "premium_usd_soft": resolved["budget"]["premium_usd_soft"],
-                "premium_usd_hard": resolved["budget"]["premium_usd_hard"],
-                "currency": resolved["budget"]["currency"],
-            },
         }
 
     role_key = role.strip()
@@ -614,10 +613,10 @@ def route_model(
     requires_escalation = False
     reasons: list[str] = []
 
+    # Packet complexity must never auto-select Sol/Fable (TPC-MODEL-001).
+    # Size/depth breaches may still hit subcontractor ceilings above.
     if task_class == "packet_implement" and _packet_complexity(packet, resolved):
-        model_class = "premium"
-        requires_escalation = True
-        reasons.append("packet_complexity_threshold")
+        reasons.append("packet_complexity_noted_non_premium")
 
     if task_class == "hard_implement":
         model_class = "premium"
@@ -651,10 +650,6 @@ def route_model(
         if task_class == "hard_implement":
             # Still recommend premium, but mark escalation required before launch.
             reasons.append("escalation_required")
-        elif task_class == "packet_implement":
-            model_class = "standard"
-            requires_escalation = False
-            reasons.append("complexity_without_escalation_downgraded")
 
     if max_mode and model_class == "premium" and not _escalation_valid(escalation, task_class):
         requires_escalation = True
@@ -667,18 +662,6 @@ def route_model(
             requires_escalation = False
             reasons.append("role_forbids_premium_default")
 
-    budget = resolved["budget"]
-    budget_state = "ok"
-    if budget["recorded_premium_usd"] >= budget["premium_usd_hard"]:
-        budget_state = "hard"
-        if model_class == "premium":
-            model_class = "standard"
-            requires_escalation = False
-            reasons.append("budget_hard_downgrade")
-    elif budget["recorded_premium_usd"] >= budget["premium_usd_soft"]:
-        budget_state = "soft"
-        reasons.append("budget_soft_warning")
-
     allowed_ids = list(resolved["model_aliases"].get(model_class, []))
     return {
         "ok": True,
@@ -688,17 +671,8 @@ def route_model(
         "allowed_model_ids": allowed_ids,
         "requires_escalation": requires_escalation,
         "max_mode_allowed": model_class == "premium" and _escalation_valid(escalation, task_class),
-        "budget": {
-            "state": budget_state,
-            "recorded_premium_usd": budget["recorded_premium_usd"],
-            "premium_usd_soft": budget["premium_usd_soft"],
-            "premium_usd_hard": budget["premium_usd_hard"],
-            "currency": budget["currency"],
-        },
         "reasons": reasons,
-        "denial_code": None
-        if budget_state != "hard" or task_class not in {"hard_implement"}
-        else DENIAL_BUDGET_HARD,
+        "denial_code": None,
     }
 
 
@@ -760,11 +734,8 @@ def attest_model_use(
         and _escalation_valid(escalation, task_class)
     )
     hard_ok = task_class == "hard_implement" and _escalation_valid(escalation, task_class)
-    packet_ok = task_class == "packet_implement" and _escalation_valid(
-        escalation, task_class
-    )
     allowlisted_ok = task_class in allowlist and _escalation_valid(escalation, task_class)
-    if not (hard_ok or remediate_ok or packet_ok or allowlisted_ok):
+    if not (hard_ok or remediate_ok or allowlisted_ok):
         return {
             "ok": False,
             "denial_code": DENIAL_PREMIUM_MODEL_POLICY,
@@ -779,13 +750,6 @@ def attest_model_use(
             "ok": False,
             "denial_code": DENIAL_PREMIUM_MODEL_POLICY,
             "error": "max_mode with premium requires a valid escalation artifact",
-        }
-
-    if resolved["budget"]["recorded_premium_usd"] >= resolved["budget"]["premium_usd_hard"]:
-        return {
-            "ok": False,
-            "denial_code": DENIAL_BUDGET_HARD,
-            "error": "premium budget hard limit reached",
         }
 
     return {
@@ -805,6 +769,11 @@ def check_evidence_age(
     policy: dict[str, Any] | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
+    """Report wall-clock age; never hard-deny on age alone (TPC-CUT-004).
+
+    Currency is digest of the current artifact elsewhere; aged timestamps remain
+    admissible when the caller is checking age alone.
+    """
     resolved = validate_execution_policy(policy or default_execution_policy())
     try:
         stamp = datetime.fromisoformat(captured_at.replace("Z", "+00:00"))
@@ -815,18 +784,12 @@ def check_evidence_age(
     current = now or datetime.now(timezone.utc)
     age = (current - stamp).total_seconds()
     max_age = resolved["evidence_max_age_seconds"]
-    if age > max_age:
-        return {
-            "ok": False,
-            "denial_code": DENIAL_EVIDENCE_STALE,
-            "age_seconds": age,
-            "max_age_seconds": max_age,
-        }
     return {
         "ok": True,
         "denial_code": None,
         "age_seconds": age,
         "max_age_seconds": max_age,
+        "aged": age > max_age,
     }
 
 
@@ -874,59 +837,17 @@ def record_premium_usage(
     source: str,
     note: str = "",
 ) -> dict[str, Any]:
-    if not isinstance(amount_usd, (int, float)) or isinstance(amount_usd, bool) or amount_usd < 0:
-        raise ContractError("amount_usd must be a non-negative number")
-    if not isinstance(source, str) or not source.strip():
-        raise ContractError("source must be a nonempty string")
-    root = program_root.expanduser().resolve()
-    path = root / "premium-usage.json"
-    if path.is_file():
-        try:
-            ledger = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise ContractError(f"cannot read premium-usage.json: {exc}") from exc
-        if not isinstance(ledger, dict) or ledger.get("schema") != USAGE_SCHEMA:
-            raise ContractError("unsupported premium-usage schema")
-    else:
-        ledger = {
-            "schema": USAGE_SCHEMA,
-            "currency": "USD",
-            "total_premium_usd": 0.0,
-            "entries": [],
-        }
-    entry = {
-        "recorded_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "amount_usd": float(amount_usd),
-        "source": source.strip(),
-        "note": note,
-        "actor": "user",
-    }
-    entries = list(ledger.get("entries") or [])
-    entries.append(entry)
-    total = float(ledger.get("total_premium_usd") or 0.0) + float(amount_usd)
-    ledger = {
-        "schema": USAGE_SCHEMA,
-        "currency": "USD",
-        "total_premium_usd": total,
-        "entries": entries,
-    }
-    path.write_text(json.dumps(ledger, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return ledger
+    """Invoice ledger removed from harness control surface (TPC-CUT-002)."""
+    del program_root, amount_usd, source, note
+    raise ContractError(
+        "premium usage invoice ledger removed from harness control surface "
+        "(no USD budget hard-stop / premium-usage.json gate)"
+    )
 
 
 def load_recorded_premium_usd(program_root: Path) -> float:
-    path = program_root.expanduser().resolve() / "premium-usage.json"
-    if not path.is_file():
-        return 0.0
-    try:
-        ledger = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return 0.0
-    if not isinstance(ledger, dict) or ledger.get("schema") != USAGE_SCHEMA:
-        return 0.0
-    total = ledger.get("total_premium_usd", 0.0)
-    if isinstance(total, (int, float)) and not isinstance(total, bool):
-        return float(total)
+    """Invoice ledger is non-control; always report zero for callers."""
+    del program_root
     return 0.0
 
 
@@ -1054,19 +975,15 @@ def validate_packet_attestation(
     )
 
 
-def policy_status_summary(policy: dict[str, Any], recorded_premium_usd: float) -> dict[str, Any]:
+def policy_status_summary(
+    policy: dict[str, Any], recorded_premium_usd: float = 0.0
+) -> dict[str, Any]:
+    """Status summary without USD hard/soft gate states (TPC-CUT-002)."""
+    del recorded_premium_usd  # invoice spend is not a control plane input
     resolved = validate_execution_policy(policy)
-    budget = dict(resolved["budget"])
-    budget["recorded_premium_usd"] = recorded_premium_usd
-    state = "ok"
-    if recorded_premium_usd >= budget["premium_usd_hard"]:
-        state = "hard"
-    elif recorded_premium_usd >= budget["premium_usd_soft"]:
-        state = "soft"
     return {
         "schema": resolved["schema"],
         "premium_allowlist": resolved["premium_allowlist"],
         "evidence_max_age_seconds": resolved["evidence_max_age_seconds"],
-        "budget": {**budget, "state": state},
         "task_class_defaults": resolved["task_class_defaults"],
     }

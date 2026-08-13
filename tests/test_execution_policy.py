@@ -10,7 +10,6 @@ import pytest
 
 from corp_harness.cli import dispatch
 from corp_harness.execution_policy import (
-    DENIAL_EVIDENCE_STALE,
     DENIAL_PREMIUM_MODEL_POLICY,
     ESCALATION_SCHEMA,
     attest_model_use,
@@ -157,13 +156,16 @@ def test_packet_attestation_fixture_paths() -> None:
 
 
 def test_evidence_max_age() -> None:
+    # TPC-CUT-004: wall-clock age alone never hard-denies evidence.
     now = datetime(2026, 7, 20, 12, 0, tzinfo=timezone.utc)
     fresh = (now - timedelta(seconds=10)).isoformat().replace("+00:00", "Z")
     stale = (now - timedelta(seconds=301)).isoformat().replace("+00:00", "Z")
     assert check_evidence_age(fresh, now=now)["ok"] is True
     stale_result = check_evidence_age(stale, now=now)
-    assert stale_result["ok"] is False
-    assert stale_result["denial_code"] == DENIAL_EVIDENCE_STALE
+    assert stale_result["ok"] is True
+    assert stale_result["denial_code"] is None
+    assert stale_result["aged"] is True
+    assert stale_result["age_seconds"] > stale_result["max_age_seconds"]
 
 
 def test_program_persists_execution_policy(tmp_path: Path) -> None:
@@ -178,6 +180,10 @@ def test_program_persists_execution_policy(tmp_path: Path) -> None:
     loaded = Program.load(path)
     assert loaded.execution_policy is not None
     assert loaded.execution_policy["evidence_max_age_seconds"] == 300
+    # USD budget hard-stop fields are not harness control defaults.
+    budget = loaded.execution_policy.get("budget") or {}
+    assert "premium_usd_hard" not in budget
+    assert "recorded_premium_usd" not in budget
 
 
 def test_cli_route_model_and_attest(tmp_path: Path) -> None:
@@ -268,8 +274,9 @@ def test_cli_route_model_and_attest(tmp_path: Path) -> None:
 
 
 def test_cli_usage_record_requires_user(tmp_path: Path) -> None:
-    # ACC-TPC-LEGAL-003: invoice/usage refuses --actor user (reserved for
-    # FA / user_approval / recover-chain). Non-user actors may still record.
+    # ACC-TPC-LEGAL-003 / TPC-CUT-002: invoice/usage is refused as a control
+    # surface. --actor user cannot unlock invoice writes (reserved for FA /
+    # user_approval / recover-chain). Non-user actors also cannot record.
     root = tmp_path / "corp"
     site = tmp_path / "site"
     root.mkdir()
@@ -288,21 +295,21 @@ def test_cli_usage_record_requires_user(tmp_path: Path) -> None:
                 apply=True,
             )
         )
-    result, code = dispatch(
-        _ns(
-            command="usage",
-            usage_command="record",
-            root=root,
-            actor="coo",
-            amount_usd=1500.0,
-            source="cursor-invoice",
-            note="sol",
-            apply=True,
+    with pytest.raises(ContractError, match="removed from harness control surface"):
+        dispatch(
+            _ns(
+                command="usage",
+                usage_command="record",
+                root=root,
+                actor="coo",
+                amount_usd=1500.0,
+                source="cursor-invoice",
+                note="sol",
+                apply=True,
+            )
         )
-    )
-    assert code == 0
-    assert result["ledger"]["total_premium_usd"] == 1500.0
     status, status_code = dispatch(_ns(command="status", root=root))
     assert status_code == 0
-    assert status["execution_policy"]["budget"]["recorded_premium_usd"] == 1500.0
-    assert status["execution_policy"]["budget"]["state"] == "hard"
+    summary = status["execution_policy"]
+    assert "recorded_premium_usd" not in (summary.get("budget") or {})
+    assert (summary.get("budget") or {}).get("state") != "hard"

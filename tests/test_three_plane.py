@@ -5,17 +5,27 @@ from __future__ import annotations
 import inspect
 import json
 import os
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
+from corp_harness import execution_policy as ep
 from corp_harness import runtime_engine as tre
 from corp_harness.cli import main
 from corp_harness.contracts import ContractError
 from corp_harness.evidence_validation import admit_attest_evidence
 from corp_harness.execution_policy import (
+    DEFAULT_MODEL_ALIASES,
+    DENIAL_PREMIUM_MODEL_POLICY,
+    ESCALATION_SCHEMA,
+    attest_model_use,
+    check_evidence_age,
+    classify_model_id,
     collect_admissible_gate_packets,
+    default_execution_policy,
+    record_premium_usage,
     route_model,
     site_manager_after_packet_outcome,
     validate_packet_attestation,
@@ -413,7 +423,7 @@ def test_TPC_LEGAL_003_actor_user_scoped_fa_approval_recover_only(
     assert "user_approval" in USER_GATED_ARTIFACTS
     _, root, _ = _minimal_program(tmp_path)
 
-    # Invoice/usage-style: --actor user refused.
+    # Invoice/usage control surface is refused; --actor user cannot unlock it.
     code = main(
         [
             "usage",
@@ -432,7 +442,9 @@ def test_TPC_LEGAL_003_actor_user_scoped_fa_approval_recover_only(
     usage_payload = json.loads(capsys.readouterr().out)
     assert code == 3
     assert usage_payload["ok"] is False
-    assert "refuses --actor user" in str(usage_payload.get("error") or "")
+    err = str(usage_payload.get("error") or "")
+    assert "refuses --actor user" in err
+    assert not (root / "premium-usage.json").exists()
 
     # recover-chain still requires --actor user.
     code = main(
@@ -807,3 +819,226 @@ def test_TPC_SEC_GENESIS_001_status_record_bounded_events_lock_write_still_denie
     )
     assert decision["permission"] == "deny"
     assert decision["halt_report"]["verdict"] == "halt_report"
+
+
+def test_TPC_MODEL_001_grok46_aliases_non_premium() -> None:
+    aliases = DEFAULT_MODEL_ALIASES
+    for band in ("fast", "standard"):
+        assert "cursor-grok-4.6-high-fast" in aliases[band]
+        assert "grok-4.6" in aliases[band]
+        assert "composer-2.5" in aliases[band] or "composer-2.5-fast" in aliases[band]
+        assert "grok-4.5" in aliases[band] or "cursor-grok-4.5-high-fast" in aliases[band]
+    for model_id in ("cursor-grok-4.6-high-fast", "grok-4.6"):
+        assert classify_model_id(model_id) in {"fast", "standard"}
+        assert classify_model_id(model_id) != "premium"
+        refused = attest_model_use(
+            model_id=model_id,
+            model_class="premium",
+            task_class="hard_implement",
+            escalation={
+                "schema": ESCALATION_SCHEMA,
+                "authorized": True,
+                "task_class": "hard_implement",
+                "reason": "must not make grok premium",
+                "id": "esc-grok46",
+            },
+        )
+        assert refused["ok"] is False
+        assert refused["denial_code"] == DENIAL_PREMIUM_MODEL_POLICY
+    fast = route_model(role="operations-excellence", task_class="evidence_recapture")
+    standard = route_model(role="site-specialist", task_class="packet_implement")
+    assert fast["model_class"] == "fast"
+    assert "cursor-grok-4.6-high-fast" in fast["allowed_model_ids"]
+    assert "grok-4.6" in fast["allowed_model_ids"]
+    assert standard["model_class"] == "standard"
+    assert "cursor-grok-4.6-high-fast" in standard["allowed_model_ids"]
+    assert "grok-4.6" in standard["allowed_model_ids"]
+    premium_ids = set(aliases["premium"])
+    assert premium_ids <= {"gpt-5.6-sol", "gpt-5.6-sol-max", "gpt-5.6-sol-max-fast"} | {
+        "claude-fable",
+        "claude-4.6-fable",
+        "claude-4.6-fable-medium",
+        "claude-4.5-fable",
+    }
+    assert "grok-4.6" not in premium_ids
+    assert "cursor-grok-4.6-high-fast" not in premium_ids
+
+
+def test_TPC_MODEL_001_sol_fable_refused_recapture_review_first_remediate() -> None:
+    for task_class in ("evidence_recapture", "independent_review", "design_review"):
+        for model_id in ("gpt-5.6-sol-max", "claude-4.6-fable"):
+            result = attest_model_use(
+                model_id=model_id,
+                model_class="premium",
+                task_class=task_class,
+            )
+            assert result["ok"] is False
+            assert result["denial_code"] == DENIAL_PREMIUM_MODEL_POLICY
+        routed = route_model(role="operations-excellence", task_class=task_class)
+        assert routed["model_class"] != "premium"
+        assert not any(
+            "sol" in mid.lower() or "fable" in mid.lower()
+            for mid in routed["allowed_model_ids"]
+        )
+
+    first = route_model(role="site-specialist", task_class="remediate")
+    assert first["model_class"] == "standard"
+    first_attest = attest_model_use(
+        model_id="gpt-5.6-sol-max",
+        model_class="premium",
+        task_class="remediate",
+        failed_standard_attempts=0,
+    )
+    assert first_attest["ok"] is False
+    assert first_attest["denial_code"] == DENIAL_PREMIUM_MODEL_POLICY
+
+
+def test_TPC_MODEL_001_no_complexity_auto_sol() -> None:
+    complex_packet = {
+        "role": "site-specialist",
+        "packet_id": "WP-COMPLEX",
+        "root": "/tmp/site",
+        "write_set": [f"path-{i}.py" for i in range(40)],
+        "routed_model": "composer-2.5",
+        "success_schema": "pytest exit 0",
+        "halt_conditions": ["Would auto-select Sol from complexity"],
+        "changed_paths": [f"src/file_{i}.py" for i in range(40)],
+        "acceptance_ids": [f"ACC-{i}" for i in range(12)],
+        "hard_implement": True,
+        "requires_premium": True,
+    }
+    routed = route_model(
+        role="site-specialist",
+        task_class="packet_implement",
+        packet=complex_packet,
+    )
+    assert routed["ok"] is True
+    assert routed["model_class"] != "premium"
+    assert routed["requires_escalation"] is False
+    assert not any(
+        "sol" in mid.lower() or "fable" in mid.lower()
+        for mid in routed["allowed_model_ids"]
+    )
+    assert "packet_complexity_threshold" not in routed.get("reasons", [])
+
+
+def test_TPC_MODEL_001_escalation_schema_without_usd_fields() -> None:
+    clean = {
+        "schema": ESCALATION_SCHEMA,
+        "authorized": True,
+        "task_class": "hard_implement",
+        "reason": "authorized hard implement",
+        "id": "esc-clean",
+    }
+    ok = attest_model_use(
+        model_id="gpt-5.6-sol-max",
+        model_class="premium",
+        task_class="hard_implement",
+        escalation=clean,
+    )
+    assert ok["ok"] is True
+    for bad_key, bad_value in (
+        ("premium_usd", 12.0),
+        ("amount_usd", 9.0),
+        ("invoice", "inv-1"),
+        ("recorded_premium_usd", 100.0),
+        ("currency", "USD"),
+        ("budget", {"premium_usd_hard": 1}),
+    ):
+        dirty = {**clean, bad_key: bad_value, "id": f"esc-bad-{bad_key}"}
+        refused = attest_model_use(
+            model_id="gpt-5.6-sol-max",
+            model_class="premium",
+            task_class="hard_implement",
+            escalation=dirty,
+        )
+        assert refused["ok"] is False, bad_key
+        assert refused["denial_code"] == DENIAL_PREMIUM_MODEL_POLICY
+    # No dollar fields on the clean artifact.
+    assert not any(
+        key in clean
+        for key in (
+            "premium_usd",
+            "amount_usd",
+            "invoice",
+            "recorded_premium_usd",
+            "currency",
+            "budget",
+        )
+    )
+
+
+def test_TPC_MODEL_002_no_usd_hard_stop_paths() -> None:
+    assert not hasattr(ep, "DENIAL_BUDGET_HARD")
+    policy_src = Path(ep.__file__).read_text(encoding="utf-8")
+    assert "DENIAL_BUDGET_HARD" not in policy_src
+    assert "budget_hard_downgrade" not in policy_src
+    assert "premium budget hard limit" not in policy_src
+    policy = default_execution_policy()
+    assert "premium_usd_hard" not in (policy.get("budget") or {})
+    assert "recorded_premium_usd" not in (policy.get("budget") or {})
+    # Legacy budget values must not deny route/attest.
+    legacy = default_execution_policy()
+    legacy["budget"] = {
+        "premium_usd_soft": 1.0,
+        "premium_usd_hard": 1.0,
+        "recorded_premium_usd": 9999.0,
+        "currency": "USD",
+    }
+    routed = route_model(
+        role="site-specialist",
+        task_class="hard_implement",
+        policy=legacy,
+        escalation={
+            "schema": ESCALATION_SCHEMA,
+            "authorized": True,
+            "task_class": "hard_implement",
+            "reason": "no usd hard stop",
+            "id": "esc-no-usd",
+        },
+    )
+    assert routed["ok"] is True
+    assert routed["model_class"] == "premium"
+    assert routed.get("denial_code") is None
+    attested = attest_model_use(
+        model_id="gpt-5.6-sol-max",
+        model_class="premium",
+        task_class="hard_implement",
+        policy=legacy,
+        escalation={
+            "schema": ESCALATION_SCHEMA,
+            "authorized": True,
+            "task_class": "hard_implement",
+            "reason": "no usd hard stop",
+            "id": "esc-no-usd-attest",
+        },
+    )
+    assert attested["ok"] is True
+    with pytest.raises(ContractError, match="removed from harness control surface"):
+        record_premium_usage(Path("/tmp"), amount_usd=1.0, source="invoice")
+
+
+def test_TPC_MODEL_002_aged_current_digest_evidence_admissible(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _, root, _ = _minimal_program(tmp_path)
+    now = datetime(2026, 8, 13, 12, 0, tzinfo=timezone.utc)
+    aged = (now - timedelta(seconds=10_000)).isoformat().replace("+00:00", "Z")
+    age = check_evidence_age(aged, now=now)
+    assert age["ok"] is True
+    assert age["denial_code"] is None
+    assert age["aged"] is True
+    code = main(
+        [
+            "check",
+            "--root",
+            str(root),
+            "--evidence-captured-at",
+            aged,
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert code in {0, 1}
+    assert payload.get("denial_code") != "EVIDENCE_MAX_AGE_EXCEEDED"
+    assert payload.get("evidence_age", {}).get("ok") is True
+    assert "EVIDENCE_MAX_AGE_EXCEEDED" not in str(payload.get("issues") or [])

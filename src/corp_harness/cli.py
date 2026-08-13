@@ -22,9 +22,7 @@ from corp_harness.execution_policy import (
     TASK_CLASSES,
     check_evidence_age,
     load_policy_for_program,
-    load_recorded_premium_usd,
     policy_status_summary,
-    record_premium_usage,
     route_model,
     validate_packet_attestation,
 )
@@ -170,19 +168,23 @@ def build_parser() -> argparse.ArgumentParser:
     usage_parser = subparsers.add_parser(
         "usage",
         help=(
-            "record or show premium model invoice usage "
-            "(--actor user refused; reserved for FA/approval/recover-chain)"
+            "premium invoice usage control surface removed "
+            "(TPC-CUT-002; --actor user still reserved for FA/approval/recover-chain)"
         ),
     )
     usage_sub = usage_parser.add_subparsers(dest="usage_command", required=True)
-    usage_record = usage_sub.add_parser("record", help="record invoice premium spend")
+    usage_record = usage_sub.add_parser(
+        "record", help="refused: invoice ledger removed from harness control"
+    )
     _root_argument(usage_record)
     usage_record.add_argument("--actor", required=True)
     usage_record.add_argument("--amount-usd", type=float, required=True)
     usage_record.add_argument("--source", required=True)
     usage_record.add_argument("--note", default="")
     usage_record.add_argument("--apply", action="store_true")
-    usage_show = usage_sub.add_parser("show", help="show recorded premium spend")
+    usage_show = usage_sub.add_parser(
+        "show", help="refused: invoice ledger removed from harness control"
+    )
     _root_argument(usage_show)
 
     archive_parser = subparsers.add_parser("archive", help="create or verify an archive")
@@ -359,17 +361,11 @@ def dispatch(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         dirty = _maybe_dirty_scan(program_root, factory_root=factory_root, program=program)
         issues = program.current_issues(program_root=program_root)
         policy = load_policy_for_program(program_root, program)
-        recorded = load_recorded_premium_usd(program_root)
-        # Reflect invoice ledger into the in-memory policy budget for status only.
-        policy = dict(policy)
-        budget = dict(policy.get("budget") or {})
-        budget["recorded_premium_usd"] = recorded
-        policy["budget"] = budget
         result = {
             "ok": not issues and dirty.get("ok", True),
             "program": program.to_dict(),
             "issues": issues,
-            "execution_policy": policy_status_summary(policy, recorded),
+            "execution_policy": policy_status_summary(policy),
         }
         if dirty.get("dirty"):
             result["anti_harness"] = dirty
@@ -578,10 +574,6 @@ def _route_model(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     program = _load_program(args.root)
     program_root = args.root.expanduser().resolve()
     policy = load_policy_for_program(program_root, program)
-    recorded = load_recorded_premium_usd(program_root)
-    budget = dict(policy.get("budget") or {})
-    budget["recorded_premium_usd"] = recorded
-    policy = {**policy, "budget": budget}
     packet = _load_json_object(args.packet, label="packet") if args.packet else None
     escalation = (
         _load_json_object(args.escalation, label="escalation") if args.escalation else None
@@ -603,50 +595,24 @@ def _route_model(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
 
 
 def _usage(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
-    program_root = args.root.expanduser().resolve()
+    """Refuse invoice/usage as a control surface (TPC-CUT-002 / ACC-TPC-LEGAL-003).
+
+    Parsers remain so TRUST_GATED inventory strings stay stable; recording is never
+    admitted. --actor user remains reserved for FA / user_approval / recover-chain
+    and must not unlock invoice writes here.
+    """
     _load_program(args.root)  # ensure program exists
-    if args.usage_command == "show":
-        recorded = load_recorded_premium_usd(program_root)
-        path = program_root / "premium-usage.json"
-        ledger = None
-        if path.is_file():
-            ledger = _load_json_object(path, label="premium-usage")
-        return {
-            "ok": True,
-            "recorded_premium_usd": recorded,
-            "ledger": ledger,
-        }, 0
-    if args.usage_command == "record":
-        # ACC-TPC-LEGAL-003 / TPC-LEGAL-004: --actor user only for FA,
-        # user_approval, and recover-chain — refuse on invoice/usage.
-        if args.actor == "user":
-            raise ContractError(
-                "invoice/usage refuses --actor user "
-                "(reserved for factory_authorization, user_approval, recover-chain)"
-            )
-        preview = {
-            "ok": True,
-            "apply": False,
-            "amount_usd": float(args.amount_usd),
-            "source": args.source,
-            "note": args.note,
-            "recorded_premium_usd": load_recorded_premium_usd(program_root)
-            + float(args.amount_usd),
-        }
-        if not args.apply:
-            return preview, 0
-        program = _load_program(args.root)
-        factory_root = Path(program.site_path).expanduser().resolve()
-        _maybe_dirty_scan(
-            program_root, factory_root=factory_root, program=program, force=True
+    if args.usage_command == "record" and getattr(args, "actor", None) == "user":
+        raise ContractError(
+            "invoice/usage refuses --actor user "
+            "(reserved for factory_authorization, user_approval, recover-chain); "
+            "premium usage invoice ledger removed from harness control surface"
         )
-        ledger = record_premium_usage(
-            program_root,
-            amount_usd=float(args.amount_usd),
-            source=args.source,
-            note=args.note,
+    if args.usage_command in {"record", "show"}:
+        raise ContractError(
+            "premium usage invoice ledger removed from harness control surface "
+            "(no USD budget hard-stop / premium-usage.json gate)"
         )
-        return {"ok": True, "apply": True, "ledger": ledger}, 0
     raise ContractError(f"unknown usage command: {args.usage_command}")
 
 
@@ -656,10 +622,6 @@ def _check(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     issues = program.current_issues(program_root=program_root)
     result: dict[str, Any] = {"ok": not issues, "issues": issues}
     policy = load_policy_for_program(program_root, program)
-    recorded = load_recorded_premium_usd(program_root)
-    budget = dict(policy.get("budget") or {})
-    budget["recorded_premium_usd"] = recorded
-    policy = {**policy, "budget": budget}
 
     if args.attest_packet is not None:
         packet = _load_json_object(args.attest_packet, label="attest-packet")
@@ -680,17 +642,9 @@ def _check(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
             result["issues"] = issues
 
     if args.evidence_captured_at:
+        # Age is telemetry only; digest currentness is enforced elsewhere.
         age = check_evidence_age(args.evidence_captured_at, policy=policy)
         result["evidence_age"] = age
-        if not age.get("ok"):
-            result["ok"] = False
-            result["denial_code"] = age.get("denial_code")
-            issues = list(result.get("issues") or [])
-            issues.append(
-                f"evidence age {age.get('age_seconds')}s exceeds "
-                f"{age.get('max_age_seconds')}s"
-            )
-            result["issues"] = issues
 
     if args.run:
         command = list(args.argv)
