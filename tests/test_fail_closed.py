@@ -960,7 +960,7 @@ def test_FC_EVIDENCE_001_run_evidence_forwards_program_root_env(
         "#!/bin/sh\nprintf '%s\\n' \"$CORP_HARNESS_PROGRAM_ROOT\"\n",
         encoding="utf-8",
     )
-    os.chmod(script, 0o755)
+    os.chmod(script, 0o700)
     result = run_evidence("verify", ["./echo-root.sh"], factory, factory, 10)
     assert result.passed
     assert result.stdout.strip() == str(program_a)
