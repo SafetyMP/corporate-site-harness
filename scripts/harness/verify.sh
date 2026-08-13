@@ -34,6 +34,7 @@ REQUIRED_FC_TESTS=(
   test_FC_COL_003_voided_actor_no_rehire_until_user
   test_FC_SEC_HALT_001_unbind_sibling_or_weaken_approval_halt_report
   test_FC_EVIDENCE_001_run_evidence_forwards_program_root_env
+  test_FC_EVIDENCE_002_leaked_active_packet_write_set_does_not_bypass_deny
   test_FC_SCAN_002_write_set_covers_force_apply_factory_edit
 )
 
@@ -156,6 +157,7 @@ ensure_program_root_binding
 
 # Scrub inherited bind env so pytest tmp fixtures remain authoritative.
 unset CORP_HARNESS_PROGRAM_ROOT || true
+unset CORP_HARNESS_ACTIVE_PACKET || true
 
 collected="$(python3 -m pytest --collect-only -q tests/test_trust_runtime.py tests/test_site_gate_oracles.py tests/test_fail_closed.py)"
 for name in "${REQUIRED_LOG_TESTS[@]}" "${REQUIRED_AH_TESTS[@]}" "${REQUIRED_TRR_TESTS[@]}" "${REQUIRED_SGO_TESTS[@]}" "${REQUIRED_FC_TESTS[@]}"; do

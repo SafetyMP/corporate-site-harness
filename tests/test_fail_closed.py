@@ -40,6 +40,7 @@ from corp_harness.model import USER_GATED_ARTIFACTS, ContractError, Program, dig
 @pytest.fixture(autouse=True)
 def _isolate_program_root_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(tre.PROGRAM_ROOT_ENV, raising=False)
+    monkeypatch.delenv(tre.ACTIVE_PACKET_ENV, raising=False)
 
 
 def _write(path: Path, value: str) -> Path:
@@ -964,6 +965,43 @@ def test_FC_EVIDENCE_001_run_evidence_forwards_program_root_env(
     assert result.passed
     assert result.stdout.strip() == str(program_a)
     assert (factory / tre.PROGRAM_ROOT_MARKER).read_text(encoding="utf-8") == marker_before
+
+
+def test_FC_EVIDENCE_002_leaked_active_packet_write_set_does_not_bypass_deny(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Leaked ops packet write_set must not survive oracle pytest isolation."""
+    assert tre.ACTIVE_PACKET_ENV not in SAFE_ENV_KEYS
+    factory, program_a, _sibling = _two_factory_programs(tmp_path)
+    tre.bind_program_root(factory, program_a)
+    monkeypatch.setenv(tre.PROGRAM_ROOT_ENV, str(program_a))
+    digest = program_a / "evidence" / "digest.json"
+    digest.parent.mkdir(parents=True, exist_ok=True)
+    digest.write_text("{}\n", encoding="utf-8")
+    packet = tmp_path / "leaked-ops-packet.json"
+    packet.write_text(json.dumps({"write_set": ["evidence"]}) + "\n", encoding="utf-8")
+    monkeypatch.setenv(tre.ACTIVE_PACKET_ENV, str(packet))
+    leaked = tre.evaluate_pretooluse(
+        factory,
+        program_a,
+        {"tool_name": "Write", "tool_input": {"path": str(digest)}},
+    )
+    assert leaked["permission"] == "allow"
+    monkeypatch.delenv(tre.ACTIVE_PACKET_ENV, raising=False)
+    isolated = tre.evaluate_pretooluse(
+        factory,
+        program_a,
+        {"tool_name": "Write", "tool_input": {"path": str(digest)}},
+    )
+    assert isolated["permission"] == "deny"
+    assert isolated["halt_report"]["verdict"] == "halt_report"
+    root = _repo_root()
+    verify = (root / "scripts" / "harness" / "verify.sh").read_text(encoding="utf-8")
+    adversarial = (root / "scripts" / "harness" / "adversarial.sh").read_text(
+        encoding="utf-8"
+    )
+    assert "unset CORP_HARNESS_ACTIVE_PACKET" in verify
+    assert "unset CORP_HARNESS_ACTIVE_PACKET" in adversarial
 
 
 def test_FC_SCAN_002_write_set_covers_force_apply_factory_edit(

@@ -30,6 +30,7 @@ from corp_harness.swift_gov import (
 @pytest.fixture(autouse=True)
 def _isolate_program_root_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(tre.PROGRAM_ROOT_ENV, raising=False)
+    monkeypatch.delenv(tre.ACTIVE_PACKET_ENV, raising=False)
 
 
 def _write(path: Path, value: str) -> Path:

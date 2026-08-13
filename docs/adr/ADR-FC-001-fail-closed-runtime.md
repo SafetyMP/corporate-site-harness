@@ -36,6 +36,9 @@ wipe, or re-point it. Agents never pass `--actor user`. No `trust set-score`.
      `check --run` without rewriting the sibling marker; record SITE_VERIFICATION
      artifacts (`adr:*`, implementation, verification, verification_scripts,
      runtime_manifest)
+   - `WP-FC-008` — Isolate `CORP_HARNESS_ACTIVE_PACKET` from oracle pytest so a
+     leaked ops-review `write_set` cannot launder `evidence/` or factory edits
+     into fixture tests
 
 2. **Before-write deny (FC-01):** `preToolUse` (or equivalent) denies writes to
    protected corporate and factory surfaces unless a non-expired mutation permit
@@ -77,7 +80,11 @@ wipe, or re-point it. Agents never pass `--actor user`. No `trust set-score`.
 
 8. **Completion (FC-08):** Oracle only over `scripts/harness/{verify,adversarial}.sh`
    bound to current digests. Uncommitted recover-chain / log-lock / scan work is
-   **not** a PASS until those oracles are green with current digests.
+   **not** a PASS until those oracles are green with current digests. Oracle
+   pytest MUST NOT inherit `CORP_HARNESS_ACTIVE_PACKET`: `verify.sh` /
+   `adversarial.sh` unset it before pytest, and fail-closed autouse fixtures
+   `delenv` it so tmp write_set files stay authoritative. `run_evidence` MUST
+   NOT add that key to `SAFE_ENV_KEYS`.
 
 ## Consequences
 
