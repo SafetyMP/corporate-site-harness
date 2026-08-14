@@ -419,7 +419,6 @@ def test_TPC_COURT_003_status_record_next_without_d8_or_report_event(
 ) -> None:
     """ACC-TPC-COURT-003: no baseline/D8/report-event control for status/record/next/apply."""
     factory, root, _ = _minimal_program(tmp_path)
-    program = Program.load(root / "program.json")
     tre.bind_program_root(factory, root, seed_baseline=False)
     monkeypatch.setenv(tre.PROGRAM_ROOT_ENV, str(root))
     baseline = root / "trust-surface-baseline.json"
