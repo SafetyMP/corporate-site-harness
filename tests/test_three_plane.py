@@ -493,7 +493,6 @@ def test_TPC_CUT_001_gov_optional_for_status_record_next(
 ) -> None:
     """TPC-CUT-002: status/record/next succeed without corp-gov-check (never GOV_REQUIRED)."""
     factory, root, _ = _minimal_program(tmp_path)
-    program = Program.load(root / "program.json")
     tre.bind_program_root(factory, root, seed_baseline=False)
     monkeypatch.setenv(tre.PROGRAM_ROOT_ENV, str(root))
     monkeypatch.setenv("CORP_GOV_CHECK", str(tmp_path / "missing-corp-gov-check"))
