@@ -422,6 +422,7 @@ def dispatch(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
             try:
                 covered.append(str(artifact_path.relative_to(program_root)))
             except ValueError:
+                # Evidence may live outside the program root; keep program.json only.
                 pass
             _authorized_mutating_apply(
                 program_root,

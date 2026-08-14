@@ -228,7 +228,7 @@ if __name__ == "__main__":
 """,
         encoding="utf-8",
     )
-    script.chmod(0o755)
+    script.chmod(0o700)
     return script
 
 
@@ -376,7 +376,7 @@ def test_write_receipt_empty_stdout_gov_required(
     program.save(root / "program.json")
     stub = tmp_path / "empty-stdout-write-receipt"
     stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    stub.chmod(0o755)
+    stub.chmod(0o700)
     monkeypatch.setenv("CORP_GOV_CHECK", str(stub))
     code = main(["gov", "write-receipt", "--root", str(root)])
     payload = json.loads(capsys.readouterr().out)
