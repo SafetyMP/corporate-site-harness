@@ -20,12 +20,13 @@ from corp_harness.contracts import (
 )
 from corp_harness.evidence import SAFE_ENV_KEYS, run_evidence
 from corp_harness.execution_policy import (
-    DENIAL_BUDGET_HARD,
     DENIAL_CHILD_PROSE_EVIDENCE,
+    DENIAL_PREMIUM_MODEL_POLICY,
     DENIAL_SAME_SESSION_REVIEWER,
     DENIAL_SEALED_WORK_ORDER,
     DENIAL_SUBCONTRACTOR_CEILING,
     DENIAL_VOIDED_ACTOR,
+    attest_model_use,
     collect_admissible_gate_packets,
     default_execution_policy,
     route_model,
@@ -516,25 +517,36 @@ def test_FC_004_subcontractor_ceilings_halt() -> None:
 
 
 def test_FC_004_premium_not_ceiling_bypass() -> None:
+    # Remediate without escalation stays standard; Sol is not a ceiling bypass.
     failed = route_model(
         role="site-specialist",
         task_class="remediate",
         failed_standard_attempts=9,
     )
-    assert failed["model_class"] != "premium"
+    assert failed["model_class"] == "standard"
     assert not any("sol" in item.lower() for item in failed["allowed_model_ids"])
 
-    policy = default_execution_policy()
-    policy["budget"]["recorded_premium_usd"] = policy["budget"]["premium_usd_hard"]
+    refused = attest_model_use(
+        model_id="gpt-5.6-sol-max",
+        model_class="premium",
+        task_class="remediate",
+        failed_standard_attempts=9,
+    )
+    assert refused["ok"] is False
+    assert refused["denial_code"] == DENIAL_PREMIUM_MODEL_POLICY
+
+    # USD hard-stop removed: hard_implement still routes premium+escalation
+    # required; denial is never PREMIUM_BUDGET_HARD.
     hard = route_model(
         role="site-specialist",
         task_class="hard_implement",
-        policy=policy,
+        policy=default_execution_policy(),
         packet=_sealed_packet(),
     )
-    assert hard["model_class"] != "premium"
-    assert hard["denial_code"] == DENIAL_BUDGET_HARD
-    assert not any("sol" in item.lower() for item in hard["allowed_model_ids"])
+    assert hard["model_class"] == "premium"
+    assert hard["requires_escalation"] is True
+    assert hard.get("denial_code") is None
+    assert hard.get("denial_code") != "PREMIUM_BUDGET_HARD"
 
 
 def test_FC_005_light_band_no_gate_skip(tmp_path: Path) -> None:
@@ -869,6 +881,7 @@ def test_FC_COL_002_producer_cannot_record_own_gate(tmp_path: Path) -> None:
 
 
 def test_FC_COL_003_voided_actor_no_rehire_until_user(tmp_path: Path) -> None:
+    """TPC-CUT-006: career ledger ignored for route-model; session/self-record still deny."""
     _factory, program_a, _sibling = _two_factory_programs(tmp_path)
     tre.void_involved_packets(
         program_a,
@@ -882,40 +895,51 @@ def test_FC_COL_003_voided_actor_no_rehire_until_user(tmp_path: Path) -> None:
         actor_ids=["banned-actor"],
         session_ids=["banned-session"],
     )
-    denied = route_model(
+    assert tre.is_voided_actor(program_a, actor_id="banned-actor")
+    allowed = route_model(
         role="site-specialist",
         task_class="packet_implement",
         packet=_sealed_packet(
             actor_id="banned-actor",
+            session_id="banned-session",
             corporate_root=str(program_a),
         ),
     )
-    assert denied["ok"] is False
-    assert denied["denial_code"] == DENIAL_VOIDED_ACTOR
+    assert allowed["ok"] is True
+    assert allowed.get("denial_code") != DENIAL_VOIDED_ACTOR
+
+    # Reinstate remains user-gated audit API (not a route control).
     with pytest.raises(ContractError, match="unauthorized_actor"):
         tre.reinstate_voided_actor(
             program_a, actor="site-specialist", actor_id="banned-actor"
         )
     tre.reinstate_voided_actor(program_a, actor="user", actor_id="banned-actor")
     assert not tre.is_voided_actor(program_a, actor_id="banned-actor")
-    still = route_model(
-        role="site-specialist",
-        task_class="packet_implement",
-        packet=_sealed_packet(
-            session_id="banned-session",
-            corporate_root=str(program_a),
-        ),
+
+    same = _sealed_packet(
+        role="operations-excellence",
+        task_class="independent_review",
+        packet_id="WP-FC-VOID-REV",
+        task_id="session-producer",
+        session_id="session-producer",
+        producer_session_id="session-producer",
+        model_id="cursor-grok-4.5-high-fast",
+        model_class="fast",
     )
-    assert still["denial_code"] == DENIAL_VOIDED_ACTOR
-    tre.reinstate_voided_actor(
-        program_a, actor="user", session_id="banned-session"
-    )
-    ok = route_model(
-        role="site-specialist",
-        task_class="packet_implement",
-        packet=_sealed_packet(corporate_root=str(program_a)),
-    )
-    assert ok["ok"] is True
+    with pytest.raises(ContractError, match="NEW Task"):
+        validate_reviewer_launch(same, producer_session_id="session-producer")
+    attested = validate_packet_attestation(same)
+    assert attested["ok"] is False
+    assert attested["denial_code"] == DENIAL_SAME_SESSION_REVIEWER
+
+    program = Program.load(program_a / "program.json")
+    auth = _write(program_a / "factory-authorization.json", "{}\n")
+    with pytest.raises(ContractError, match="must be produced by user"):
+        program.record_artifact(
+            "factory_authorization", auth, "site-specialist", program_a
+        )
+    with pytest.raises(ContractError, match="must be produced by user"):
+        program.record_artifact("user_approval", auth, "ceo", program_a)
 
 
 def test_FC_SEC_HALT_001_unbind_sibling_or_weaken_approval_halt_report(

@@ -13,6 +13,12 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
+from test_fail_closed import (
+    test_FC_EVIDENCE_001_run_evidence_forwards_program_root_env as _fc_evidence_001,
+)
+from test_fail_closed import (
+    test_FC_EVIDENCE_002_leaked_active_packet_write_set_does_not_bypass_deny as _fc_evidence_002,
+)
 
 from corp_harness import runtime_engine as tre
 from corp_harness.cli import main
@@ -323,6 +329,7 @@ def test_TR_D9_003_ordering_validate_only(tmp_path: Path) -> None:
 def test_TR_D9_003_requires_heavy_intermediate_no_event_final_emits(
     tmp_path: Path,
 ) -> None:
+    """TPC-COURT-001: score/band telemetry must not force action_routed_layer."""
     _, root, _ = _minimal_program(tmp_path)
     digest = digest_path(root / "program.json")
     tre.save_trust_state(
@@ -336,8 +343,10 @@ def test_TR_D9_003_requires_heavy_intermediate_no_event_final_emits(
         ),
     )
     route = tre.route_for_action(root, "record_artifact:other")
-    assert route["action_routed_layer"] == "heavy"
-    # requires_heavy re-route emits no TrustEvent
+    assert route["execution_layer"] == "heavy"
+    assert route["trust_score"] == 0.69
+    assert route["action_routed_layer"] == "light"
+    # Intermediate route consult emits no TrustEvent
     assert tre.load_trust_state(root).last_event is None
     # Final mutating apply still emits when writer path runs.
     state = tre.emit_and_apply(
@@ -513,6 +522,7 @@ def test_TR_D10_008_forbidden_trust_set_score_cheat_paths() -> None:
 def test_TR_D6_001_heavy_missing_gov_required(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """TPC-COURT-001: heavy score band does not route heavy; light soft-fails gov."""
     _, root, _ = _minimal_program(tmp_path)
     digest = digest_path(root / "program.json")
     tre.save_trust_state(
@@ -527,11 +537,13 @@ def test_TR_D6_001_heavy_missing_gov_required(
     )
     monkeypatch.setenv("CORP_GOV_CHECK", str(tmp_path / "missing-binary"))
     route = tre.route_for_action(root, "record_artifact:other")
+    assert route["execution_layer"] == "heavy"
+    assert route["action_routed_layer"] == "light"
     err = tre.require_heavy_available(
         action_routed_layer_value=route["action_routed_layer"],
         swift_available=False,
     )
-    assert err == tre.GOV_REQUIRED
+    assert err is None
 
 
 def test_TR_D6_002_fg001_missing_gov_required(
@@ -551,6 +563,7 @@ def test_TR_D6_002_fg001_missing_gov_required(
 def test_TR_D6_003_bound_root_light_missing_gov_required(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """TPC-PIPE-001: bound root does not force heavy_validate / GOV_REQUIRED."""
     from corp_harness.cli import _enforce_trust_route
 
     _, root, factory = _minimal_program(tmp_path)
@@ -560,10 +573,10 @@ def test_TR_D6_003_bound_root_light_missing_gov_required(
     monkeypatch.setenv(tre.PROGRAM_ROOT_ENV, str(root))
     monkeypatch.setenv("CORP_GOV_CHECK", str(tmp_path / "missing-corp-gov-check"))
     assert tre.program_root_is_bound(factory)
-    assert tre.heavy_validate_forced(root, factory_root=factory)
+    assert tre.heavy_validate_forced(root, factory_root=factory) is False
     assert tre.route_for_action(root, "record_artifact:other")["action_routed_layer"] == "light"
-    with pytest.raises(ContractError, match=tre.GOV_REQUIRED):
-        _enforce_trust_route(root, "record_artifact:other", factory_root=factory)
+    # Light apply on bound root: no heavy_validate theater / GOV_REQUIRED.
+    _enforce_trust_route(root, "record_artifact:other", factory_root=factory)
 
 
 def test_TR_D6_004_heavy_empty_stdout_gov_required(
@@ -628,13 +641,18 @@ def test_TR_FG001_002_heavy_validate_skipped_at_score_1_0_unbound_root(
 
 
 def test_TR_FG001_003_heavy_validate_forced_when_root_bound(tmp_path: Path) -> None:
+    """TPC-PIPE-001: bound root alone must not force heavy_validate."""
     _, root, factory = _minimal_program(tmp_path)
     digest = digest_path(root / "program.json")
     tre.save_trust_state(root, tre.synthesize_trust_state(digest))
     tre.bind_program_root(factory, root, seed_baseline=False)
     assert tre.program_root_is_bound(factory)
     assert tre.route_for_action(root, "record_artifact:other")["action_routed_layer"] == "light"
-    assert tre.heavy_validate_forced(root, factory_root=factory)
+    assert tre.heavy_validate_forced(root, factory_root=factory) is False
+    # Explicit heavy_validate / FG-001 seals remain heavy when invoked.
+    assert tre.route_for_action(root, tre.HEAVY_VALIDATE_ACTION)["action_routed_layer"] == "heavy"
+    for action in tre.ALWAYS_FORCE_HEAVY_ACTIONS:
+        assert tre.route_for_action(root, action)["action_routed_layer"] == "heavy"
 
 
 test_TR_FG001_002_heavy_validate_skipped_at_score_1_0 = (
@@ -643,16 +661,18 @@ test_TR_FG001_002_heavy_validate_skipped_at_score_1_0 = (
 
 
 def test_TR_D10_001_validation_failure_forces_heavy_on_next_apply(tmp_path: Path) -> None:
+    """TPC-COURT-001: validation_failure updates court telemetry, not route layer."""
     _, root, _ = _minimal_program(tmp_path)
     digest = digest_path(root / "program.json")
     tre.emit_and_apply(
         root, kind="validation_failure", program_digest=digest, reasons=["fail"]
     )
     assert tre.load_trust_state(root).execution_layer == "heavy"
-    assert tre.route_for_action(root, "record_artifact:other")["action_routed_layer"] == "heavy"
+    assert tre.route_for_action(root, "record_artifact:other")["action_routed_layer"] == "light"
 
 
 def test_TR_D10_002_deceptive_theater_forces_heavy_on_next_apply(tmp_path: Path) -> None:
+    """TPC-COURT-001: theater zeros score telemetry but does not force heavy route."""
     _, root, _ = _minimal_program(tmp_path)
     digest = digest_path(root / "program.json")
     tre.emit_and_apply(
@@ -663,7 +683,7 @@ def test_TR_D10_002_deceptive_theater_forces_heavy_on_next_apply(tmp_path: Path)
         reasons=["kpi"],
     )
     assert tre.load_trust_state(root).trust_score == Decimal("0.00")
-    assert tre.route_for_action(root, "check_apply")["action_routed_layer"] == "heavy"
+    assert tre.route_for_action(root, "check_apply")["action_routed_layer"] == "light"
 
 
 def test_TR_D10_003_fourteen_strict_success_recovers_light(tmp_path: Path) -> None:
@@ -1868,8 +1888,12 @@ def test_TR_AH_015_unbind_program_root_seal_bypass_no_sg03(
     assert tre.load_trust_state(root).last_event["theater_signal_id"] == (
         "seal_bypass_attempt"
     )
-    # Unbind must not restore SG-03: mutating apply without Swift → GOV_REQUIRED.
+    # Unbind must not restore SG-03 soft-fail; light apply stays light (PIPE-001)
+    # while FG-001 seals remain GOV_REQUIRED without corp-gov-check.
+    from corp_harness.cli import _enforce_trust_route
+
     monkeypatch.setenv("CORP_GOV_CHECK", str(tmp_path / "missing-corp-gov-check"))
+    assert tre.sg03_soft_fail_allowed(factory_root=factory, program_root=root) is False
     master = _write(root / "master-spec.md", "# Spec\n")
     # Re-bind temporarily is forbidden for this assertion; keep unbound.
     code = main(
@@ -1887,10 +1911,14 @@ def test_TR_AH_015_unbind_program_root_seal_bypass_no_sg03(
         ]
     )
     out = json.loads(capsys.readouterr().out)
-    assert code == 3
-    assert out["ok"] is False
-    assert "GOV_REQUIRED" in str(out.get("error") or "")
-    assert tre.load_trust_state(root).trust_score == Decimal("0.00")
+    assert code == 0
+    assert out["ok"] is True
+    assert tre.route_for_action(root, "record_artifact:other")["action_routed_layer"] == (
+        "light"
+    )
+    with pytest.raises(ContractError, match=tre.GOV_REQUIRED):
+        _enforce_trust_route(root, "record_artifact:gates", factory_root=factory)
+    assert tre.sg03_soft_fail_allowed(factory_root=factory, program_root=root) is False
 
 
 def test_TR_AH_016_status_and_gated_cli_run_dirty_scan(
@@ -2476,3 +2504,17 @@ def test_FC_INCIDENT_001_chain_incident_r1_fixture_and_verify_required_collect()
     )
     for name in required:
         assert name in verify_sh
+
+
+def test_FC_EVIDENCE_001_run_evidence_forwards_program_root_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """G-TPC-002 node id; body retained from WP-FC-007 (ACC-TPC-LEGAL-002)."""
+    _fc_evidence_001(tmp_path, monkeypatch)
+
+
+def test_FC_EVIDENCE_002_leaked_active_packet_write_set_does_not_bypass_deny(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """G-TPC-002 node id; body retained from WP-FC-008 (ACC-TPC-LEGAL-002)."""
+    _fc_evidence_002(tmp_path, monkeypatch)

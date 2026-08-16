@@ -32,12 +32,16 @@ CHAIN_RECOVERY_SCHEMA = "corporate-site-chain-recovery/v1"
 MUTATION_PERMIT_SCHEMA = "corporate-site-trust-mutation-permit/v1"
 SURFACE_BASELINE_SCHEMA = "corporate-site-trust-surface-baseline/v1"
 HALT_REPORT_SCHEMA = "corporate-site-halt-report/v1"
+THREE_PLANE_SCHEMA = "corporate-site-three-plane/v1"
 ACTIVE_PACKET_ENV = "CORP_HARNESS_ACTIVE_PACKET"
 ACTIVE_WRITE_SET_FILE = "trust-active-write-set.json"
 VOIDED_ACTORS_FILE = "trust-voided-actors.json"
 VOIDED_ACTORS_SCHEMA = "corporate-site-voided-actors/v1"
+THREE_PLANE_NAMES = ("capability", "evidence", "spend")
+MAGNET_CHEAT_BITS = frozenset({"hook_write", "actor_skip", "self_approval"})
+# Apply auto-bind is the legal write path (WP-TPC-002/006). Mint is not legal next.
 LEGAL_NEXT_COMMANDS = (
-    "corp-harness mint-mutation-permit",
+    "corp-harness apply",
     "corp-harness status",
     "corp-harness route-model",
     "corp-harness check",
@@ -77,8 +81,10 @@ LOCKED_MANDATES = (
     "premium_not_trust_reward",
     "product_sites_must_not_edit_src_corp_harness",
     "scripts_harness_verify_and_adversarial_only",
+    "three_plane_only_capability_evidence_spend",
+    "trust_score_telemetry_not_routing",
 )
-LOG_ENTRY_KINDS = frozenset({"trust_event", "digest_rebind"})
+LOG_ENTRY_KINDS = frozenset({"trust_event", "digest_rebind", "magnet_cheat_bit"})
 # Pre-r3 writer emitted digest_amnesty during ADR-TR-001 score-reset amnesty.
 # Verify-only grandfather: historical lines may remain in the chain; append
 # writers must never mint new digest_amnesty (superseded by digest_rebind).
@@ -380,7 +386,12 @@ def apply_covered_skip_void(
 
 
 def halt_unbind_or_weaken_approval(packet: dict[str, Any]) -> dict[str, Any] | None:
-    """Halt-report success when a packet would unbind the sibling or weaken approval."""
+    """Halt when explicit boolean weaken/unbind flags are true (TPC-HALT-001).
+
+    Matches only ``unbind_sibling``, ``skip_adversary``, ``skip_user_approval``,
+    ``weaken_adversary``, and ``weaken_user_approval``. Never substring-matches
+    ``halt_conditions`` prose.
+    """
     if not isinstance(packet, dict):
         return None
     flags = (
@@ -390,21 +401,7 @@ def halt_unbind_or_weaken_approval(packet: dict[str, Any]) -> dict[str, Any] | N
         bool(packet.get("skip_adversary")),
         bool(packet.get("skip_user_approval")),
     )
-    blob = json.dumps(packet, default=str).lower()
-    textual = any(
-        needle in blob
-        for needle in (
-            "unbind trust runtime residuals",
-            "unbind sibling",
-            "rewrite .corp-harness-program-root",
-            "skip adversary",
-            "weaken adversary",
-            "weaken user_approval",
-            "skip user_approval",
-            "waive user approval",
-        )
-    )
-    if not any(flags) and not textual:
+    if not any(flags):
         return None
     return build_halt_report(
         reason=(
@@ -421,16 +418,113 @@ def expand_action(action: str) -> str:
 
 
 def action_routed_layer(score: Decimal, action: str) -> str:
+    """Route by action name only (TPC-COURT-001/002).
+
+    ``score`` remains for call-site compatibility and status telemetry but MUST
+    NOT select layer. Score-band helpers are not consulted here.
+    """
+    del score  # telemetry only; never selects layer (ADR-TPC-001)
     action = expand_action(action) if action != FG001_SEAL_ALIAS else action
     if action in ALWAYS_FORCE_HEAVY_ACTIONS or action == HEAVY_VALIDATE_ACTION:
-        return "heavy"
-    if execution_layer_for_score(score) == "heavy":
         return "heavy"
     return "light"
 
 
 def is_always_force_heavy(action: str) -> bool:
     return action in ALWAYS_FORCE_HEAVY_ACTIONS
+
+
+def evaluate_three_planes(
+    *,
+    capability_ok: bool,
+    evidence_ok: bool,
+    spend_ok: bool,
+    trust_score: Decimal | float | str | None = None,
+    execution_layer: str | None = None,
+    theater_kind: str | None = None,
+    magnet_bits: dict[str, Any] | list[str] | None = None,
+    career_ledger: Any = None,
+    usd_budget: Any = None,
+) -> dict[str, Any]:
+    """Allow/deny from Capability + Evidence + Spend only (TPC-PLANE-001).
+
+    trust_score, theater kind, magnet bits, career ledger, and USD budget are
+    accepted for call-site convenience and ignored for the decision.
+    """
+    del trust_score, execution_layer, theater_kind, magnet_bits, career_ledger
+    del usd_budget
+    planes = {
+        "capability": bool(capability_ok),
+        "evidence": bool(evidence_ok),
+        "spend": bool(spend_ok),
+    }
+    refused = [name for name in THREE_PLANE_NAMES if not planes[name]]
+    allowed = not refused
+    return {
+        "schema": THREE_PLANE_SCHEMA,
+        "allowed": allowed,
+        "permission": "allow" if allowed else "deny",
+        "planes": planes,
+        "refused_planes": refused,
+        "controls": list(THREE_PLANE_NAMES),
+        "ignored_for_decision": [
+            "trust_score",
+            "execution_layer",
+            "theater_kind",
+            "magnet_bits",
+            "career_ledger",
+            "usd_budget",
+        ],
+    }
+
+
+def append_magnet_cheat_bit(
+    program_root: Path,
+    *,
+    bit: str,
+    program_digest: str,
+    reasons: list[str] | None = None,
+) -> dict[str, Any]:
+    """Append an audit-only Magnet cheat bit; never changes score or routing."""
+    if bit not in MAGNET_CHEAT_BITS:
+        raise ContractError(
+            f"unknown magnet cheat bit: {bit!r}; allowed={sorted(MAGNET_CHEAT_BITS)}"
+        )
+    root = program_root.expanduser().resolve()
+    entry = append_trust_log_entry(
+        root,
+        entry_kind="magnet_cheat_bit",
+        program_digest=program_digest,
+        payload={
+            "bit": bit,
+            "audit_only": True,
+            "reasons": list(reasons or [bit]),
+        },
+    )
+    state_path = trust_state_path(root)
+    if state_path.is_file():
+        state = load_trust_state(root)
+        save_trust_state(
+            root,
+            TrustState(
+                trust_score=state.trust_score,
+                execution_layer=state.execution_layer,
+                program_digest=state.program_digest,
+                last_event=state.last_event,
+                updated_at=state.updated_at,
+                log_tip_hash=str(entry["entry_hash"]),
+                log_seq=int(entry["seq"]),
+                generation=state.generation,
+                pending_rebind_from=state.pending_rebind_from,
+                false_genesis=state.false_genesis,
+            ),
+        )
+    return entry
+
+
+def magnet_bits_affect_routing() -> bool:
+    """Magnet bits are audit-only (TPC-SEC-MAGNET-001)."""
+    return False
 
 
 @dataclass
@@ -552,7 +646,8 @@ def load_trust_state(program_root: Path, *, program_json: Path | None = None) ->
     must not append `digest_rebind`.
 
     Post-log / post-anchor state deletion must not synthesize 1.0/light
-    (false genesis → fail-closed 0.0 heavy until report-event applies).
+    (false genesis → fail-closed 0.0 heavy telemetry). report-event is optional
+    anti-harness telemetry, not a required unlock for legal apply after auto-bind.
     """
     root = program_root.expanduser().resolve()
     program_path = (program_json or (root / "program.json")).expanduser().resolve()
@@ -1431,14 +1526,33 @@ def bind_program_root(
     program_root: Path,
     *,
     seed_baseline: bool = True,
+    actor: str | None = None,
 ) -> Path:
-    """Write factory→corporate program-root binding marker."""
+    """Write factory→corporate program-root binding marker.
+
+    Session bind prefers ``CORP_HARNESS_PROGRAM_ROOT`` (env>marker). Rewriting an
+    existing marker to a different corporate root is user-gated
+    (ACC-TPC-MULTI-001 / ADR-TPC-001). Initial bind when the marker is absent,
+    and idempotent re-bind to the same path, remain allowed without actor=user.
+    """
     factory = factory_root.expanduser().resolve()
     corporate = program_root.expanduser().resolve()
     if not (corporate / "program.json").is_file():
         raise ContractError(f"program does not exist: {corporate / 'program.json'}")
     marker = factory / PROGRAM_ROOT_MARKER
-    marker.write_text(str(corporate) + "\n", encoding="utf-8")
+    new_text = str(corporate) + "\n"
+    if marker.is_file():
+        current = marker.read_text(encoding="utf-8")
+        if current.strip() != str(corporate) and actor != "user":
+            raise ContractError(
+                "unauthorized_actor: rewriting "
+                f"{PROGRAM_ROOT_MARKER} requires --actor user"
+            )
+        if current == new_text:
+            if seed_baseline:
+                update_surface_baseline(corporate, factory_root=factory)
+            return marker
+    marker.write_text(new_text, encoding="utf-8")
     if seed_baseline:
         update_surface_baseline(corporate, factory_root=factory)
     return marker
@@ -1480,14 +1594,13 @@ def heavy_validate_forced(
 ) -> bool:
     """Whether mutating apply must run heavy validate-action.
 
-    Bound roots always force (handoff heavy_validate_always_force_when_root_bound).
-    Unbound roots force only when the trust band / action already routes heavy
-    (score < 0.70 or always-force seals); score 1.0 unbound skips the gate.
+    Bound-root MUST NOT imply always-heavy because trust is low
+    (ACC-TPC-PIPE-001 / ADR-TPC-001). Score/band telemetry and bind state are
+    not consulted; FG-001 always-force remains action-name keyed via
+    ``action_routed_layer``.
     """
-    if program_root_is_bound(factory_root):
-        return True
-    state = load_trust_state(program_root)
-    return execution_layer_for_score(state.trust_score) == "heavy"
+    del program_root, factory_root
+    return False
 
 
 def prior_binding_established(program_root: Path) -> bool:
@@ -1609,9 +1722,8 @@ def classify_disabled_hooks_seal_bypass(
     )
     if not program_root_is_bound(factory):
         return None
-    if not baseline_had_factory_hooks(program_root) and not factory_hooks_installed(
-        factory
-    ):
+    # Only after a prior intact install was baselined (not genesis noise).
+    if not baseline_had_factory_hooks(program_root):
         return None
     if required_hooks_intact(factory):
         return None
@@ -1913,6 +2025,95 @@ def load_active_write_set(program_root: Path) -> tuple[str, ...]:
     return ()
 
 
+def auto_bind_active_packet(
+    program_root: Path,
+    packet_path: Path,
+) -> dict[str, Any]:
+    """Bind CORP_HARNESS_ACTIVE_PACKET from an attested sealed packet.
+
+    Sets the env var and persists write_set so apply / dirty-scan succeed
+    without a separately minted mutation permit and without the caller
+    manually exporting ACTIVE_PACKET (ACC-TPC-LEGAL-001 / ADR-TPC-001).
+    """
+    root = program_root.expanduser().resolve()
+    path = packet_path.expanduser().resolve()
+    if not path.is_file():
+        raise ContractError(f"active packet not found: {path}")
+    try:
+        body = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ContractError(f"cannot read active packet: {exc}") from exc
+    if not isinstance(body, dict):
+        raise ContractError("active packet must be an object")
+    raw = body.get("write_set")
+    if not isinstance(raw, list) or not raw:
+        raise ContractError("active packet requires nonempty write_set")
+    cleaned = [
+        _normalize_relpath(item)
+        for item in raw
+        if isinstance(item, str) and item.strip()
+    ]
+    if not cleaned:
+        raise ContractError("active packet write_set has no usable paths")
+    os.environ[ACTIVE_PACKET_ENV] = str(path)
+    payload = {
+        "write_set": cleaned,
+        "packet_id": body.get("packet_id"),
+        "packet_path": str(path),
+    }
+    (root / ACTIVE_WRITE_SET_FILE).write_text(
+        json.dumps(payload, indent=2) + "\n", encoding="utf-8"
+    )
+    return {
+        "ok": True,
+        "active_packet": str(path),
+        "write_set": cleaned,
+        "packet_id": body.get("packet_id"),
+        "env": ACTIVE_PACKET_ENV,
+    }
+
+
+def apply_with_autobind(
+    program_root: Path,
+    packet_path: Path,
+    *,
+    factory_root: Path | None = None,
+    program: Program | None = None,
+) -> dict[str, Any]:
+    """Auto-bind packet write_set and accept covered dirty surfaces (no mint)."""
+    root = program_root.expanduser().resolve()
+    bound = auto_bind_active_packet(root, packet_path)
+    loaded = program
+    if loaded is None:
+        program_file = root / "program.json"
+        if program_file.is_file():
+            loaded = Program.load(program_file)
+    factory = (
+        factory_root.expanduser().resolve()
+        if factory_root is not None
+        else (
+            Path(loaded.site_path).expanduser().resolve()
+            if loaded is not None
+            else None
+        )
+    )
+    # No mint_mutation_permit: write_set coverage is the legal path (WP-TPC-002).
+    scan = run_deferred_dirty_scan(
+        root, factory_root=factory, program=loaded, force=True
+    )
+    update_surface_baseline(root, factory_root=factory)
+    return {
+        "ok": True,
+        "apply": True,
+        "autobind": bound,
+        "dirty": bool(scan.get("dirty")),
+        "reported": list(scan.get("reported") or []),
+        "active_packet": bound["active_packet"],
+        "write_set": list(bound["write_set"]),
+        "minted_permit": False,
+    }
+
+
 def write_set_covers_path(rel: str, write_set: tuple[str, ...]) -> bool:
     normalized = _normalize_relpath(rel)
     for surface in write_set:
@@ -1977,6 +2178,7 @@ def build_halt_report(
         "schema": HALT_REPORT_SCHEMA,
         "verdict": "halt_report",
         "ok": True,
+        "halted": True,
         "reason": reason,
         "protected_path": protected_path,
         "legal_next": list(legal_next),
@@ -2351,15 +2553,9 @@ def detect_false_genesis_signals(program_root: Path) -> list[dict[str, str]]:
                     "protected_path": "trust-event-log.jsonl",
                 }
             )
-    state = load_trust_state(root)
-    if state.false_genesis:
-        findings.append(
-            {
-                "theater_signal_id": "out_of_band_mutation",
-                "reason": "false genesis: refuse synthesize 1.0 after log/anchor evidence",
-                "protected_path": "trust-state.json",
-            }
-        )
+    # false_genesis remains load-visible score telemetry (0.0 heavy). Dual-wipe
+    # signals above stay anti-harness findings. report-event is not required to
+    # unlock legal apply after auto-bind (TPC-CUT-003 / ACC-TPC-COURT-003).
     return findings
 
 
@@ -2603,6 +2799,12 @@ def run_deferred_dirty_scan(
                 f"{root} != bound program root {bound} (env>marker)"
             )
         return {"ok": False, "dirty": True, "reported": reported, "skipped": False}
+
+    # ACC-TPC-SEC-GENESIS-001: cheap genesis is the should_run_deferred_dirty_scan
+    # early return above (clean unbound/new root). When that predicate is true —
+    # bound root, installed hooks, or prior binding — do not skip on
+    # is_true_genesis; bound-root OOB/seal scans must still run (AH-005/016).
+    # Deny-before-write on irreversible lock writes remains separate.
 
     findings = detect_dirty_surfaces(
         root,
