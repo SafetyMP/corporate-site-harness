@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Local `programs/`, `evidence/`, `archives/`, and `.corp-harness-program-root`
   are gitignored (runtime state, not source)
+- CI pins `ruff==0.16.6` and `build==1.6.0`; ADRs and the chain-incident
+  fixture no longer cite personal home paths
 
 ## [0.1.0] - 2026-08-09
 

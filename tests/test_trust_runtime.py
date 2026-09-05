@@ -2481,25 +2481,10 @@ def test_FC_INCIDENT_001_chain_incident_r1_fixture_and_verify_required_collect()
         },
         "verify_error": "expected seq 6313, got 6312",
     }
-    live = Path(
-        "/Users/sagehart/Downloads/Fail Closed Harness/evidence/chain-incident-r1.json"
-    )
-    try:
-        live_readable = live.is_file()
-    except OSError:
-        live_readable = False
-    if live_readable:
-        raw = json.loads(live.read_text(encoding="utf-8"))
-        log = raw.get("log") or {}
-        assert log.get("duplicate_seq") == fixture["duplicate_seq"]
-        assert log.get("duplicate_at_file_lines") == fixture["duplicate_at_file_lines"]
-        assert (log.get("kind_counts") or {}).get("out_of_band_mutation") == 6310
-        assert fixture["verify_error"] in str(log.get("verify_error") or "")
-    else:
-        assert fixture["duplicate_seq"] == 6312
-        assert fixture["duplicate_at_file_lines"] == [6312, 6313]
-        assert fixture["kind_counts"]["out_of_band_mutation"] == 6310
-        assert "expected seq 6313, got 6312" in fixture["verify_error"]
+    assert fixture["duplicate_seq"] == 6312
+    assert fixture["duplicate_at_file_lines"] == [6312, 6313]
+    assert fixture["kind_counts"]["out_of_band_mutation"] == 6310
+    assert "expected seq 6313, got 6312" in fixture["verify_error"]
     verify_sh = (
         Path(__file__).resolve().parents[1] / "scripts" / "harness" / "verify.sh"
     ).read_text(encoding="utf-8")

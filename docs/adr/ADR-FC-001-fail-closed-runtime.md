@@ -18,8 +18,8 @@ TR-11). It cites **ADR-TR-001 TR-12 orthogonality**: trust routing does not
 subsume `route-model` / premium model policy. Premium/Sol is never a trust
 reward, ceiling bypass, or recovery mechanism.
 
-Sibling marker `.corp-harness-program-root` remains bound to
-`/Users/sagehart/Downloads/Trust Runtime Residuals`. Agents must not unbind,
+Sibling marker `.corp-harness-program-root` remains bound to the
+trust-runtime-residuals factory sibling workspace. Agents must not unbind,
 wipe, or re-point it. Agents never pass `--actor user`. No `trust set-score`.
 
 ## Decision

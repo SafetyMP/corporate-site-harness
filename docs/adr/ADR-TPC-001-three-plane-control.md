@@ -12,9 +12,9 @@ Capability, Evidence, and Spend. Phase-1 fail-closed invariants remain.
 
 This ADR **cites** [`ADR-FC-001-fail-closed-runtime.md`](ADR-FC-001-fail-closed-runtime.md)
 and does **not** reopen fail-closed-runtime r1 or its decision surface. Sibling
-marker `.corp-harness-program-root` remains
-`/Users/sagehart/Downloads/Trust Runtime Residuals`. Session bind uses
-`CORP_HARNESS_PROGRAM_ROOT=/Users/sagehart/Downloads/Three Plane Harness`.
+marker `.corp-harness-program-root` remains the
+trust-runtime-residuals factory sibling workspace. Session bind uses
+`CORP_HARNESS_PROGRAM_ROOT` at the three-plane-control program root.
 Agents never pass `--actor user`.
 
 Implementation baseline (parent restores before packets):
