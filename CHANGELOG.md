@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are gitignored (runtime state, not source)
 - CI pins `ruff==0.16.6` and `build==1.6.0`; ADRs and the chain-incident
   fixture no longer cite personal home paths
+- CI and harness-LLM export installs use `--require-hashes` with
+  PyPI-resolved hash pins (`requirements-ci.txt`,
+  `datasets/harness-llm/requirements-export.txt`)
 
 ## [0.1.0] - 2026-08-09
 
