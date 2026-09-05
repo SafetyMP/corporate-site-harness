@@ -103,6 +103,8 @@ def site_path_hits_reserved(path: str | Path) -> bool:
     try:
         names.append(candidate.resolve().name.casefold())
     except OSError:
+        # Resolution can fail for inaccessible/broken paths; keep fallback
+        # behavior by relying on the raw candidate name collected above.
         pass
     if candidate.is_symlink():
         try:
