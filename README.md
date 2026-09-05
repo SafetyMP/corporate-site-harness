@@ -8,6 +8,8 @@ agents design and review; site agents implement in an isolated repo;
 
 Agents propose. Digests decide. Humans approve.
 
+> **In the SafetyMP thesis:** Agent path for **software delivery**, not for operating an EHS, health, or finance function. See the [portfolio README](https://github.com/SafetyMP/SafetyMP).
+
 [![CI](https://github.com/SafetyMP/corporate-site-harness/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/SafetyMP/corporate-site-harness/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/SafetyMP/corporate-site-harness/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/SafetyMP/corporate-site-harness/actions/workflows/codeql.yml)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/SafetyMP/corporate-site-harness/badge)](https://scorecard.dev/viewer/?uri=github.com/SafetyMP/corporate-site-harness)
