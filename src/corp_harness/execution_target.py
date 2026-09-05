@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,8 @@ LITERAL_TARGETS = frozenset({"worktree", "isolated_copy", "cloud_subagent"})
 OPENSHELL_PREFIX = "openshell:"
 RESERVED_OPENSHELL_NAMES = frozenset({"hermes", "pi", "eval"})
 OPENSHELL_NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
+
+_LOGGER = logging.getLogger(__name__)
 
 CORPORATE_CONTROL_ROLES = frozenset(
     {
@@ -110,7 +113,8 @@ def site_path_hits_reserved(path: str | Path) -> bool:
         try:
             names.append(candidate.resolve(strict=False).name.casefold())
         except OSError:
-            pass
+            # Best-effort check: if symlink resolution fails, continue with collected names.
+            _LOGGER.debug("Failed to resolve symlink candidate for reserved-name check: %s", candidate)
     return any(name in RESERVED_OPENSHELL_NAMES for name in names)
 
 
