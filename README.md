@@ -8,7 +8,7 @@ agents design and review; site agents implement in an isolated repo;
 
 Agents propose. Digests decide. Humans approve.
 
-> **In the SafetyMP thesis:** Agent path for **software delivery**, not for operating an EHS, health, or finance function. See the [portfolio README](https://github.com/SafetyMP/SafetyMP).
+> **Permit rule:** Agents propose; digests decide; only the user records approval. This gates **how software is written**, not how an EHS/health/finance function is operated. Same instinct: [SafetyMP](https://github.com/SafetyMP/SafetyMP).
 
 [![CI](https://github.com/SafetyMP/corporate-site-harness/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/SafetyMP/corporate-site-harness/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/SafetyMP/corporate-site-harness/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/SafetyMP/corporate-site-harness/actions/workflows/codeql.yml)
