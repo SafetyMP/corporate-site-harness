@@ -14,6 +14,7 @@ behavior is ambiguous. For the end-to-end flow, start with
 | **SGA** | Swift governance assist (read-only; never mutates `program.json`) |
 | **TR** | Trust-routed runtime, event log, anti-harness signals |
 | **SGO** | Site-gate oracles (`corporate-site-handoff/v2`) |
+| **EX** | Execution targets for site compute (placement, not a plane) |
 
 ## Index
 
@@ -51,3 +52,7 @@ behavior is ambiguous. For the end-to-end flow, start with
 
 - [ADR-SGO-001](ADR-SGO-001-site-gate-oracles-handoff-v2.md) — Handoff v2 + `site_gate_oracles`
 - [ADR-SGO-002](ADR-SGO-002-template-oracles-non-regression.md) — Template fail-closed oracles
+
+### Execution targets
+
+- [ADR-EX-001](ADR-EX-001-execution-targets.md) — Legal site-compute targets; isolation is not PASS

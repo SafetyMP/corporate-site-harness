@@ -1,0 +1,20 @@
+{
+  "id": "EX-DENY-001",
+  "finding": "sandbox/VM/OpenShell green must not satisfy a named-gate PASS",
+  "expected": "deny",
+  "probe": {
+    "kind": "packet",
+    "packet": {
+      "role": "site-specialist",
+      "packet_id": "WP-EX-DENY-001",
+      "root": "/tmp/factory-site",
+      "write_set": ["src/app.py"],
+      "routed_model": "composer-2.5",
+      "success_schema": "pytest",
+      "halt_conditions": ["Would invent PASS"],
+      "pass_claim": "sandbox green, named-gate PASS",
+      "oracle_collect_digest": "deadbeef",
+      "named_gate_pass_from_isolation": true
+    }
+  }
+}

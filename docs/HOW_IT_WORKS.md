@@ -121,6 +121,20 @@ Agents **never** pass `--actor user`. A green gate is not user approval.
 1. Switch the agent workspace to the **site** root.
 2. Site manager verifies handoff digests and splits work into ADR-scoped packets.
 3. Site specialists implement in isolated worktrees (`.worktrees/<packet-id>`).
+   Packet `execution_target` is optional placement (not one of the seven sealed
+   fields). Legal tokens: `worktree` (omitted/empty default), `isolated_copy`,
+   `openshell:<name>`, `cloud_subagent`. Unknown tokens fail closed and are not
+   coerced. Reserved OpenShell names `hermes`, `pi`, and `eval` are illegal as
+   `openshell:<name>` and as `site_path`. Connect from a Mac terminal with
+   `openshell sandbox connect <name>` only — never `--editor cursor`. Do not put
+   app source in those reserved sandboxes. Corporate control roles stay
+   `worktree`. Reviewers (`independent_review`) require `isolated_copy` and do
+   not follow the implementer into OpenShell or `cloud_subagent`. Ceilings stay
+   `max_depth=1`, `max_children=6`, `no_redelegation=true`; a VM or OpenShell
+   sandbox **is** the depth-1 worker. Isolation/VM/OpenShell green is not a
+   named-gate PASS. Oracles remain only `./scripts/harness/verify.sh` and
+   `./scripts/harness/adversarial.sh`. Agents never `--actor user`. There is no
+   corp-harness sandbox/VM runtime.
 4. Operations excellence runs `./scripts/harness/verify.sh` and records an
    independent PASS/FAIL against current digests.
 

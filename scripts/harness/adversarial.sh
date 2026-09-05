@@ -46,6 +46,19 @@ REQUIRED_TRR_TESTS=(
   test_TR_D6_004_heavy_empty_stdout_gov_required
 )
 
+# ADR-EX-001 / ACC-EX-012 — executed deny cells, not name-presence.
+REQUIRED_EX_TESTS=(
+  test_EX_DENY_001_sandbox_prose_as_pass
+  test_EX_DENY_001_dummy_oracle_digest_is_not_hall_pass
+  test_EX_DENY_002_autopilot_as_actor_user
+  test_EX_DENY_003_reserved_names_as_site_path
+  test_EX_DENY_004_cursor_remote_into_openshell
+  test_EX_DENY_005_unknown_execution_target
+  test_EX_DENY_006_openshell_reserved_names
+  test_EX_DENY_007_cloud_subagent_corporate_root_write
+  test_EX_DENY_collect_all_executed
+)
+
 ensure_program_root_binding() {
   if [[ -n "${CORP_HARNESS_PROGRAM_ROOT:-}" ]]; then
     if [[ ! -f "${CORP_HARNESS_PROGRAM_ROOT}/program.json" ]]; then
@@ -120,8 +133,8 @@ ensure_program_root_binding
 unset CORP_HARNESS_PROGRAM_ROOT || true
 unset CORP_HARNESS_ACTIVE_PACKET || true
 
-collected="$(python3 -m pytest --collect-only -q tests/test_trust_runtime.py tests/test_site_gate_oracles.py)"
-for name in "${REQUIRED_AH_TESTS[@]}" "${REQUIRED_TRR_TESTS[@]}" "${REQUIRED_SGO_TESTS[@]}"; do
+collected="$(python3 -m pytest --collect-only -q tests/test_trust_runtime.py tests/test_site_gate_oracles.py tests/test_execution_target.py)"
+for name in "${REQUIRED_AH_TESTS[@]}" "${REQUIRED_TRR_TESTS[@]}" "${REQUIRED_SGO_TESTS[@]}" "${REQUIRED_EX_TESTS[@]}"; do
   if ! grep -q "::${name}$" <<<"${collected}"; then
     echo "adversarial.sh: missing collected AH/TRR test: ${name}" >&2
     exit 1
@@ -129,6 +142,7 @@ for name in "${REQUIRED_AH_TESTS[@]}" "${REQUIRED_TRR_TESTS[@]}" "${REQUIRED_SGO
 done
 
 python3 -m pytest -q tests/test_adversarial.py
+python3 -m pytest -q tests/test_execution_target.py
 python3 -m pytest -q \
   tests/test_trust_runtime.py::test_TR_AH_011_verify_adversarial_collect_ah_tests \
   tests/test_trust_runtime.py::test_TR_AH_015_unbind_program_root_seal_bypass_no_sg03 \

@@ -23,6 +23,7 @@ from corp_harness.evidence_validation import (
     enforce_pass_evidence_classes,
     executable_evidence_root,
 )
+from corp_harness.execution_target import assert_legal_site_path
 from corp_harness.site_gate_oracles import (
     ORACLE_GATES,
     iter_live_pointers,
@@ -271,7 +272,10 @@ class Program:
             raise ContractError("program_id must be a non-empty, whitespace-free identifier")
         if program_kind not in PROGRAM_KINDS:
             raise ContractError(f"unsupported program_kind: {program_kind!r}")
+
+        assert_legal_site_path(site_path)
         resolved_site = site_path.expanduser().resolve()
+        assert_legal_site_path(resolved_site)
         if not resolved_site.is_dir():
             raise ContractError(f"site path is not a directory: {resolved_site}")
         if (resolved_site / "program.json").is_file():
@@ -410,7 +414,10 @@ class Program:
             )
 
             self.execution_policy = validate_execution_policy(self.execution_policy)
+
+        assert_legal_site_path(self.site_path)
         site_root = _resolve_without_symlinks(Path(self.site_path))
+        assert_legal_site_path(site_root)
         if not site_root.is_dir():
             raise ContractError(f"site path is not a directory: {site_root}")
         if self.program_kind == "factory" and not is_factory_root(site_root):

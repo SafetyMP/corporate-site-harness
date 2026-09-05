@@ -1,0 +1,20 @@
+{
+  "id": "EX-DENY-007",
+  "finding": "cloud_subagent must not write the corporate root",
+  "expected": "deny",
+  "probe": {
+    "kind": "packet",
+    "program_root": "/tmp/sep-2026-isolation-corporate",
+    "packet": {
+      "role": "site-specialist",
+      "packet_id": "WP-EX-DENY-007",
+      "root": "/tmp/sep-2026-isolation-corporate",
+      "program_root": "/tmp/sep-2026-isolation-corporate",
+      "write_set": ["program.json", "factory-authorization.json"],
+      "routed_model": "composer-2.5",
+      "success_schema": "pytest",
+      "halt_conditions": ["Would invent PASS"],
+      "execution_target": "cloud_subagent"
+    }
+  }
+}

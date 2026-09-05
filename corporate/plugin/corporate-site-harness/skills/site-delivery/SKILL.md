@@ -31,7 +31,12 @@ description: Runs a corporate handoff through ADR decomposition, isolated site i
    expiring freshness window.
 7. The root orchestrator runs `corp-harness route-model` before each Task and
    launches site specialists in isolated worktrees under `.worktrees/<packet-id>`
-   with the routed `model=`. Premium only for escalated `hard_implement` /
+   with the routed `model=`. Packet `execution_target` defaults to `worktree`.
+   Opt-in `isolated_copy`, `openshell:<name>`, or `cloud_subagent` is placement
+   only (depth-1 worker, not extra nesting). Reserved OpenShell names `hermes`,
+   `pi`, `eval` are illegal as `openshell:<name>` and as `site_path`. Connect
+   with `openshell sandbox connect <name>` from a Mac terminal; never
+   `--editor cursor`. Premium only for escalated `hard_implement` /
    complexity `packet_implement` / post-failure `remediate`. Never `git add`
    or commit `.worktrees/` paths into the site/factory root (they are ephemeral
    and gitignored); parent `git status` dirt from those paths is a lifecycle
@@ -39,7 +44,8 @@ description: Runs a corporate handoff through ADR decomposition, isolated site i
 8. Integrate from the site root and run `scripts/harness/verify.sh`. After
    integrate/verify (or when a packet is abandoned), remove the finished
    worktree (`git worktree remove` / discard) so it cannot re-dirty the parent
-   tree. Do not leave completed packet worktrees around.
+   tree. Do not leave completed packet worktrees around. A green isolated run
+   is not a named-gate PASS.
 9. Record `verification_scripts` as site-relative `scripts/harness` containing only
    `verify.sh` and `adversarial.sh`. Never bind the whole `scripts/` tree.
 10. Ask operations excellence to inspect fresh evidence and model attestations

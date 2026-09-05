@@ -16,6 +16,10 @@ Set `.corp-harness/site.json` (`site_id`, verify/adversarial argv). Keep both
 paths are the digest boundary for site gates.
 
 Site roles (manager, specialist, operations excellence) live under `.cursor/`.
+Sealed packets may set `execution_target`: `worktree` (default), `isolated_copy`,
+`openshell:<name>`, or `cloud_subagent`. Unknown tokens fail closed. Reserved
+OpenShell names `hermes`, `pi`, `eval` are illegal. Never `--editor cursor`.
+Isolation green is not a named-gate PASS. Agents never `--actor user`.
 Corporate program state stays in a **separate** corporate root; never place
 `program.json` here.
 

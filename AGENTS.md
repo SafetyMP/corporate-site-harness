@@ -35,9 +35,16 @@ never grants user approval.
 
 Named role and Task launches require a sealed work order (`role`, `packet_id`,
 `root`, `write_set`, `routed_model`, `success_schema`, `halt_conditions`).
-Unsealed `generalPurpose` output is not gate evidence. Subcontractor ceilings:
+`execution_target` is an optional placement field (not one of those seven).
+Legal tokens: `worktree` (default), `isolated_copy`, `openshell:<name>`,
+`cloud_subagent`. Unknown tokens fail closed. Reserved OpenShell names
+`hermes`, `pi`, `eval` are illegal as `openshell:<name>` and as `site_path`.
+Connect from a Mac terminal with `openshell sandbox connect <name>` only —
+never `--editor cursor`. Isolation/VM/OpenShell green is not a named-gate
+PASS. Unsealed `generalPurpose` output is not gate evidence. Subcontractor ceilings:
 `max_depth=1`, `max_children=6`, `no_redelegation=true`; a hit is `halt_report`,
-not Sol/premium.
+not Sol/premium. A Cursor VM subagent or named OpenShell sandbox **is** the
+depth-1 worker, not extra nesting.
 
 Allow/deny is Capability + Evidence + Spend only (`ADR-TPC-001`).
 `trust_score` is principal telemetry and must not route or gate allow/deny.

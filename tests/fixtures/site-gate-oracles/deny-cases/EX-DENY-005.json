@@ -1,0 +1,18 @@
+{
+  "id": "EX-DENY-005",
+  "finding": "unknown execution_target fails closed and is not coerced to worktree",
+  "expected": "deny",
+  "probe": {
+    "kind": "packet",
+    "packet": {
+      "role": "site-specialist",
+      "packet_id": "WP-EX-DENY-005",
+      "root": "/tmp/factory-site",
+      "write_set": ["src/app.py"],
+      "routed_model": "composer-2.5",
+      "success_schema": "pytest",
+      "halt_conditions": ["Would invent PASS"],
+      "execution_target": "vercel"
+    }
+  }
+}

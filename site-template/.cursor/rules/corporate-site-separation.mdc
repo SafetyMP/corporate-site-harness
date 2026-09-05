@@ -1,0 +1,11 @@
+---
+description: Corporate and site are separate Cursor workspaces; never cross-plane move_agent_to_root
+alwaysApply: true
+---
+
+# Corporate / site workspace separation
+
+Corporate program state and this site checkout are separate Cursor workspaces.
+Never call `move_agent_to_root` to the corporate folder from here (or ask a
+corporate chat to move here). If the workspace is the wrong plane, stop and
+ask the user to open the other folder. Do not stash the other git root.

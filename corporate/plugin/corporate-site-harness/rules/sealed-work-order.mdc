@@ -7,6 +7,7 @@ alwaysApply: true
 
 Every named role and Task launch needs a sealed work order: `role`, `packet_id`,
 `root`, `write_set`, `routed_model`, `success_schema`, `halt_conditions`.
+`execution_target` may be present as placement; it is not a required field.
 Unsealed `generalPurpose` output is not gate evidence.
 
 Ceilings: `max_depth=1`, `max_children=6`, `no_redelegation=true`. A hit is

@@ -17,7 +17,11 @@ execution_policy (`PREMIUM_MODEL_POLICY`) or whose dispatch aggregate exceeds
 
 Do not fix failures, weaken gates, or accept producer-authored status. Launch as
 a NEW Task; do not reuse the implementer session. Prompt = packet id + current
-digests + oracle command only. Child prose is not evidence.
+digests + oracle command only. Child prose is not evidence. Require
+`execution_target: isolated_copy` on a fresh site checkout that is not the
+implementer tree. Do not follow the implementer into OpenShell or
+`cloud_subagent`. Isolation green is not PASS; the oracle is
+`scripts/harness/verify.sh`.
 
 Return JSON with
 `actor_role`, `site_gates`, `slos`, `verdict`, `evidence_refs`, `findings`,

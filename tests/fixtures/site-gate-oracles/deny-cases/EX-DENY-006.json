@@ -1,0 +1,18 @@
+{
+  "id": "EX-DENY-006",
+  "finding": "openshell:hermes/pi/eval (casefold, basename, symlink) must be denied",
+  "expected": "deny",
+  "probe": {
+    "kind": "packet",
+    "packet": {
+      "role": "site-specialist",
+      "packet_id": "WP-EX-DENY-006",
+      "root": "/tmp/factory-site",
+      "write_set": ["src/app.py"],
+      "routed_model": "composer-2.5",
+      "success_schema": "pytest",
+      "halt_conditions": ["Would invent PASS"],
+      "execution_target": "openshell:hermes"
+    }
+  }
+}
