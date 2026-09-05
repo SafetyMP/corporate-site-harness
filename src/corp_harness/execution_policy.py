@@ -562,8 +562,11 @@ def route_model(
             "denial_code": None,
         }
 
-    if packet:
-        target = validate_packet_execution_target(packet)
+    if packet is not None:
+        packet_for_target = dict(packet)
+        packet_for_target["role"] = role
+        packet_for_target["task_class"] = task_class
+        target = validate_packet_execution_target(packet_for_target)
         if not target.get("ok"):
             return {
                 "ok": False,
