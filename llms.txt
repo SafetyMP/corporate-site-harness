@@ -1,0 +1,22 @@
+# Corporate/Site Harness
+
+> Digest-bound gates for Cursor corporate/site delivery. Evergreen factory CLI (`corp-harness`) with evidence-bound phases; agents propose, digests decide, humans approve.
+
+This repository is the factory. Factory rules stay in AGENTS.md. Community and Copilot agents may run the CLI; they never pass `--actor user` and never self-approve.
+
+## Docs
+
+- [How it works](docs/HOW_IT_WORKS.md): lifecycle, stakeholders, evidence
+- [AGENTS.md](AGENTS.md): factory rules plus community/Copilot contract
+- [README.md](README.md): install, flow, vs LangGraph
+- [Copilot instructions](.github/copilot-instructions.md): never-do rules
+
+## Verify
+
+- `python3 -m pytest -q`
+- `python3 -m ruff check src tests`
+- `./scripts/harness/verify.sh`
+
+## Skills
+
+- [gate-evidence](.github/skills/gate-evidence/SKILL.md): record digest-bound gate evidence with `corp-harness check --run`

@@ -1,5 +1,21 @@
 # Corporate harness
 
+## Community / Copilot
+
+GitHub and Copilot agents may run this factory CLI. Factory voice stays here —
+do not move these rules out.
+
+| Command | Purpose |
+|---|---|
+| `python3 -m pytest -q` | Contract and safety tests |
+| `python3 -m ruff check src tests` | Static checks |
+| `./scripts/harness/verify.sh` | Full local gate |
+| `./scripts/harness/adversarial.sh` | Authorized local adversarial probes |
+
+Never pass `--actor user`. Never self-approve, invent a gate PASS, or type
+success by hand. Record evidence with `corp-harness check --run`. Lifecycle:
+[docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md).
+
 Human-oriented lifecycle and stakeholder map: [docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md).
 
 ## Verify

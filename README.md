@@ -1,11 +1,14 @@
 # Corporate/Site Harness
 
-**Evergreen open-source reference** for evidence-gated **Cursor agent delivery** —
-corporate agents design and review; site agents implement in an isolated repo;
-`corp-harness` advances work only on **digest-bound evidence**. Part of the
+**Digest-bound gates for Cursor corporate/site delivery.** **Evergreen
+open-source reference** for evidence-gated Cursor agent delivery — corporate
+agents design and review; site agents implement in an isolated repo;
+`corp-harness` advances work only on digest-bound evidence. Part of the
 [SafetyMP](https://github.com/SafetyMP) portfolio.
 
 Agents propose. Digests decide. Humans approve.
+
+> **Permit rule:** Agents propose; digests decide; only the user records approval. This gates **how software is written**, not how an EHS/health/finance function is operated. Same instinct: [SafetyMP](https://github.com/SafetyMP/SafetyMP).
 
 [![CI](https://github.com/SafetyMP/corporate-site-harness/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/SafetyMP/corporate-site-harness/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/SafetyMP/corporate-site-harness/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/SafetyMP/corporate-site-harness/actions/workflows/codeql.yml)
