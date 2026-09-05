@@ -26,6 +26,55 @@
       "denied": true,
       "enforcement_path": "call-site-wiring",
       "report_entry_id": "SGO-006"
+    },
+    {
+      "deny_id": "EX-DENY-001",
+      "executed": true,
+      "denied": true,
+      "enforcement_path": "execution-target",
+      "report_entry_id": "EX-001"
+    },
+    {
+      "deny_id": "EX-DENY-002",
+      "executed": true,
+      "denied": true,
+      "enforcement_path": "execution-target",
+      "report_entry_id": "EX-002"
+    },
+    {
+      "deny_id": "EX-DENY-003",
+      "executed": true,
+      "denied": true,
+      "enforcement_path": "execution-target",
+      "report_entry_id": "EX-003"
+    },
+    {
+      "deny_id": "EX-DENY-004",
+      "executed": true,
+      "denied": true,
+      "enforcement_path": "execution-target",
+      "report_entry_id": "EX-004"
+    },
+    {
+      "deny_id": "EX-DENY-005",
+      "executed": true,
+      "denied": true,
+      "enforcement_path": "execution-target",
+      "report_entry_id": "EX-005"
+    },
+    {
+      "deny_id": "EX-DENY-006",
+      "executed": true,
+      "denied": true,
+      "enforcement_path": "execution-target",
+      "report_entry_id": "EX-006"
+    },
+    {
+      "deny_id": "EX-DENY-007",
+      "executed": true,
+      "denied": true,
+      "enforcement_path": "execution-target",
+      "report_entry_id": "EX-007"
     }
   ],
   "uncovered_cells": [],

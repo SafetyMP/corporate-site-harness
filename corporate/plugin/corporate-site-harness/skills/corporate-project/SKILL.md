@@ -28,19 +28,18 @@ Each corporate folder points at exactly one site via `site_path`.
 2. Create a **new corporate folder** separate from product sites and from the
    factory checkout (e.g. `~/work/my-app-corporate` sibling to the site).
    Never nest `--root` under `--site`
-   (including `<factory>/programs/<id>`). Prefer its own git root so
-   `move_agent_to_root` can switch workspaces cleanly.
+   (including `<factory>/programs/<id>`). Prefer its own git root and its own
+   Cursor workspace. Never call `move_agent_to_root` across corporate and site.
 3. `corp-harness init --root <corporate-folder> --id <program_id> --site <site>
    [--kind product|factory] …` (dry-run first; `--apply` per policy / user
    confirmation). Nested roots are rejected for every `program_kind`.
 4. For **factory** programs: after `master_spec` is recorded, stop until the
    user records `factory_authorization` (`--actor user`). Do not advance to
    `CORPORATE_ACCEPTANCE` without it. Agents never pass `--actor user`.
-5. For corporate phases, `move_agent_to_root` to the **corporate folder** before
-   DESIGN work. Move to the **site** (or factory checkout for factory programs)
-   only at `SITE_DELIVERY`. If `move_agent_to_root` fails, is unavailable, is
-   declined, or the active root is wrong: **stop** and ask the user to
-   open/switch that path manually; do not continue from the wrong root.
+5. Corporate phases run in a chat whose workspace **already is** the corporate
+   folder. Site delivery runs in a **different** chat whose workspace already
+   is `site_path`. If this chat is the wrong plane: **stop** and ask the user
+   to open the other folder. Do not stash or fast-forward the other git root.
 
 ## Flow
 

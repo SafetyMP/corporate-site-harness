@@ -1,0 +1,24 @@
+---
+description: Legal execution_target tokens; isolation is not named-gate PASS
+alwaysApply: true
+---
+
+# Execution targets
+
+Optional sealed-packet field `execution_target` (not one of the required seven).
+Tokens: `worktree` (omitted/empty default; `.worktrees/<packet-id>`),
+`isolated_copy`, `openshell:<name>`, `cloud_subagent`. Unknown tokens fail
+closed — not coerced.
+
+`openshell:<name>` matches `^[a-z][a-z0-9-]{0,62}$`. Reserved names `hermes`,
+`pi`, `eval` are illegal as the name and as `program.site_path`. Never
+`openshell sandbox connect --editor cursor`. Never put app source in those
+reserved sandboxes.
+
+site-specialist defaults to `worktree`. operations-excellence `independent_review`
+requires `isolated_copy` (oracle tree ≠ implementer tree) and does not follow
+into OpenShell or `cloud_subagent`.
+
+Ceilings: `max_depth=1`, `max_children=6`, `no_redelegation=true`. A green
+sandbox/VM/worktree is not a named-gate PASS. Oracles remain
+`scripts/harness/{verify,adversarial}.sh`. Agents never `--actor user`.

@@ -7,6 +7,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from corp_harness.execution_target import (
+    DENIAL_EXECUTION_TARGET,
+    validate_packet_execution_target,
+)
 from corp_harness.model import ContractError
 from corp_harness.runtime_engine import (
     build_halt_report,
@@ -558,6 +562,26 @@ def route_model(
             "denial_code": None,
         }
 
+    if packet is not None:
+        packet_for_target = dict(packet)
+        packet_for_target["role"] = role
+        packet_for_target["task_class"] = task_class
+        target = validate_packet_execution_target(packet_for_target)
+        if not target.get("ok"):
+            return {
+                "ok": False,
+                "role": role.strip(),
+                "task_class": task_class,
+                "model_class": "standard",
+                "allowed_model_ids": [],
+                "requires_escalation": False,
+                "max_mode_allowed": False,
+                "verdict": "deny",
+                "reasons": [str(target.get("error") or DENIAL_EXECUTION_TARGET)],
+                "denial_code": target.get("denial_code") or DENIAL_EXECUTION_TARGET,
+                "deny_id": target.get("deny_id"),
+            }
+
     # Voided-actor / no-rehire ledger is audit-only (TPC-CUT-006); not a route control.
     ceiling_reasons = _subcontractor_ceiling_reasons(packet, resolved)
     if ceiling_reasons:
@@ -904,6 +928,15 @@ def validate_packet_attestation(
     work_order_issues = sealed_work_order_issues(packet)
     if work_order_issues:
         raise ContractError("unsigned work order: " + "; ".join(work_order_issues))
+    target = validate_packet_execution_target(packet)
+    if not target.get("ok"):
+        return {
+            "ok": False,
+            "denial_code": target.get("denial_code") or DENIAL_EXECUTION_TARGET,
+            "deny_id": target.get("deny_id"),
+            "error": target.get("error") or DENIAL_EXECUTION_TARGET,
+            "gate_evidence": False,
+        }
     if is_reviewer_packet(packet):
         try:
             validate_reviewer_launch(packet)

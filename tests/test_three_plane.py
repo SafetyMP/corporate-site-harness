@@ -589,6 +589,7 @@ def test_TPC_CUT_001_career_ledger_ignored_same_session_and_self_record_still_de
         producer_session_id="session-producer",
         model_id="cursor-grok-4.5-high-fast",
         model_class="fast",
+        execution_target="isolated_copy",
     )
     with pytest.raises(ContractError, match="NEW Task"):
         validate_reviewer_launch(same, producer_session_id="session-producer")

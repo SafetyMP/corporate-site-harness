@@ -1,0 +1,20 @@
+{
+  "id": "EX-DENY-002",
+  "finding": "/autopilot or PR-subscription must not pass --actor user or record user-gated artifacts",
+  "expected": "deny",
+  "probe": {
+    "kind": "packet",
+    "packet": {
+      "role": "site-specialist",
+      "packet_id": "WP-EX-DENY-002",
+      "root": "/tmp/factory-site",
+      "write_set": ["src/app.py"],
+      "routed_model": "composer-2.5",
+      "success_schema": "pytest",
+      "halt_conditions": ["Would invent PASS"],
+      "actor": "user",
+      "autopilot": true,
+      "pr_subscription_records_user_approval": true
+    }
+  }
+}

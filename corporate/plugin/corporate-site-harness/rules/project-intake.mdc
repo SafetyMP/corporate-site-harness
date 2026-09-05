@@ -12,9 +12,9 @@ the product corporate root. Each program lives in its own corporate folder
 (`--root`) that points at one site (`--site`). Never write `program.json` into
 the site. Never use the site path as the corporate root. Never nest `--root`
 under `--site` (including factory `programs/<id>`). Keep corporate and site
-phases in separate root workspaces. If `move_agent_to_root` fails or the active
-root is wrong, stop and ask the user to switch manually; do not continue from
-the wrong root.
+phases in separate Cursor workspaces. Never call `move_agent_to_root` across
+corporate and site. If the active root is the wrong plane, stop and ask the
+user to open the other folder; do not continue from the wrong root.
 
 Product sites must not edit factory sources (`src/corp_harness/**`) or factory
 plugin sources. Portfolio CLI (`corp-harness portfolio`) is factory platform code,

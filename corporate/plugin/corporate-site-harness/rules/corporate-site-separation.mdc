@@ -1,0 +1,25 @@
+---
+description: Corporate and site are separate Cursor workspaces; never cross-plane move_agent_to_root
+alwaysApply: true
+---
+
+# Corporate / site workspace separation
+
+Corporate root (`program.json`) and site (`program.site_path`) are **separate
+Cursor workspaces** with separate git roots. They are not one agent migrating
+between folders.
+
+**Never** call `move_agent_to_root` (or `move_agent_to_cloned_root`) from a
+corporate workspace to the site, or from a site workspace to the corporate
+folder. Cursor's root-switch stashes the **destination** (`git stash -u`),
+fast-forwards `origin`, then pops. Abort or fail-closed hooks leave destination
+work only in the stash, including untracked files.
+
+If this chat's workspace is the wrong plane: **stop**. Tell the user the
+required folder. They open it as its own window or workspace. Do not stash,
+do not fetch/ff-merge the other repo, do not continue from the wrong root.
+
+Factory programs still use a sibling corporate folder. `site_path` may be the
+factory checkout; that does **not** authorize moving the corporate agent into
+the factory. Corporate roles stay in the corporate folder. Site roles run only
+in a chat whose workspace already is `site_path`.

@@ -11,10 +11,14 @@ Grok next). Premium (Sol/Fable) only when `corp-harness route-model` returns
 post-failure `remediate`) with a valid escalation artifact. Parent must pass
 Task `model=` as `allowed_model_ids[0]` from that route.
 
-Stay inside the supplied site root, ADR, and allowed write set. You may launch
-worker subagents for independent implementation, debugging, or tests; they may
-not delegate further (`no_redelegation`, `max_depth=1`, `max_children=6`) and
-must also honor route-model. A ceiling hit is `halt_report`, not Sol/premium.
+Stay inside the supplied site root, ADR, and allowed write set. Default
+`execution_target` is `worktree` (`.worktrees/<packet-id>`). Opt-in
+`isolated_copy`, `openshell:<name>`, or `cloud_subagent` is the depth-1
+worker, not extra nesting. You may launch worker subagents for independent
+implementation, debugging, or tests; they may not delegate further
+(`no_redelegation`, `max_depth=1`, `max_children=6`) and must also honor
+route-model. A ceiling hit is `halt_report`, not Sol/premium. Never pass
+`--actor user`. Isolation green is not named-gate PASS.
 
 For product programs, never edit factory sources (`src/corp_harness/**`) or factory
 plugin sources. Portfolio platform code is factory-owned, not site-owned.

@@ -2111,7 +2111,7 @@ def test_TRR_001_swift_theater_signal_id_seven() -> None:
     assert tre.THEATER_SIGNAL_IDS == _EXPECTED_D5_THEATER_IDS
     if shutil.which("swift") is None:
         return
-    # When toolchain present, GovernanceTypesTests must stay green for the mirror.
+    # Command Line Tools can provide `swift` without XCTest.
     proc = subprocess.run(
         ["swift", "test", "--filter", "TrustRuntimeTests"],
         cwd=str(Path(__file__).resolve().parents[1] / "swift"),
@@ -2119,7 +2119,10 @@ def test_TRR_001_swift_theater_signal_id_seven() -> None:
         text=True,
         check=False,
     )
-    assert proc.returncode == 0, proc.stdout + proc.stderr
+    combined = (proc.stdout or "") + (proc.stderr or "")
+    if proc.returncode != 0 and "no such module 'XCTest'" in combined:
+        pytest.skip("Swift present without XCTest (incomplete toolchain)")
+    assert proc.returncode == 0, combined
 
 
 def test_TRR_002_heavy_oserror_gov_required(
@@ -2481,7 +2484,11 @@ def test_FC_INCIDENT_001_chain_incident_r1_fixture_and_verify_required_collect()
     live = Path(
         "/Users/sagehart/Downloads/Fail Closed Harness/evidence/chain-incident-r1.json"
     )
-    if live.is_file():
+    try:
+        live_readable = live.is_file()
+    except OSError:
+        live_readable = False
+    if live_readable:
         raw = json.loads(live.read_text(encoding="utf-8"))
         log = raw.get("log") or {}
         assert log.get("duplicate_seq") == fixture["duplicate_seq"]

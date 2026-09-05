@@ -1,0 +1,9 @@
+{
+  "id": "EX-DENY-003",
+  "finding": "hermes/pi/eval are illegal as program.site_path (casefold, basename, symlink)",
+  "expected": "deny",
+  "probe": {
+    "kind": "site_path",
+    "path": "/tmp/hermes"
+  }
+}

@@ -5,5 +5,7 @@ alwaysApply: true
 
 For an active site program, read the corporate handoff before editing. Site specialists
 implement; operations excellence reviews current evidence. Use isolated workspaces for
-independent writers. Do not alter corporate approvals, weaken tests, infer gate success,
-or grant user approval.
+independent writers. Default specialist placement is `worktree`. Reviewers use
+`isolated_copy`. Isolation green is not a named-gate PASS. Do not alter corporate
+approvals, weaken tests, infer gate success, pass `--actor user`, or grant user
+approval.

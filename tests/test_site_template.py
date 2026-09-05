@@ -59,3 +59,22 @@ def test_site_template_docs_prescribe_harness_verification_scripts() -> None:
     assert "scripts/harness" in skill
     assert "scripts/harness" in plugin_skill
     assert "whole `scripts/`" in plugin_skill
+
+
+def test_site_template_and_how_it_works_document_execution_targets() -> None:
+    agents = (TEMPLATE / "AGENTS.md").read_text(encoding="utf-8")
+    skill = (TEMPLATE / ".cursor/skills/site-delivery/SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    rule = (TEMPLATE / ".cursor/rules/execution-target.mdc").read_text(encoding="utf-8")
+    how = (ROOT / "docs/HOW_IT_WORKS.md").read_text(encoding="utf-8")
+    blob = "\n".join((agents, skill, rule, how))
+    for token in ("worktree", "isolated_copy", "openshell:", "cloud_subagent"):
+        assert token in blob
+    assert "hermes" in rule and "pi" in rule and "eval" in rule
+    assert "--editor cursor" in blob
+    assert "--actor user" in blob
+    assert "max_depth=1" in blob
+    assert "max_children=6" in blob
+    assert "no_redelegation=true" in blob
+    assert "named-gate PASS" in blob

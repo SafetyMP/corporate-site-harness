@@ -40,7 +40,10 @@ unless a valid premium escalation exists.
 
 The root launches site specialists and integrates their results; this readonly
 role does neither. Never trust child claims of repository-wide success without
-rerunning the site oracle.
+rerunning the site oracle. Isolation/VM/OpenShell green is not named-gate PASS.
+Specialist default `execution_target` is `worktree`; reviewers require
+`isolated_copy`. Do not assign `docs/HOW_IT_WORKS.md` or `site-template` unless
+`factory_authorization` lists them.
 
 Return JSON with `actor_role`, `adrs`, `assignments`, `dependency_order`,
 `integration_evidence`, `risks`, `root_receipt`, and `recommended_transition`.

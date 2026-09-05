@@ -711,6 +711,7 @@ def test_FC_SPLIT_001_reviewer_requires_fresh_task() -> None:
         task_id="session-producer",
         session_id="session-producer",
         producer_session_id="session-producer",
+        execution_target="isolated_copy",
     )
     with pytest.raises(ContractError, match="NEW Task"):
         validate_reviewer_launch(same, producer_session_id="session-producer")
@@ -727,6 +728,7 @@ def test_FC_SPLIT_001_reviewer_requires_fresh_task() -> None:
         producer_session_id="session-producer",
         model_id="cursor-grok-4.5-high-fast",
         model_class="fast",
+        execution_target="isolated_copy",
     )
     validate_reviewer_launch(fresh, producer_session_id="session-producer")
     ok = validate_packet_attestation(fresh)
@@ -789,6 +791,7 @@ def test_FC_SPLIT_003_child_prose_not_evidence() -> None:
         child_prose="they said it passed",
         model_id="cursor-grok-4.5-high-fast",
         model_class="fast",
+        execution_target="isolated_copy",
     )
     attested = validate_packet_attestation(child)
     assert attested["ok"] is False
@@ -925,6 +928,7 @@ def test_FC_COL_003_voided_actor_no_rehire_until_user(tmp_path: Path) -> None:
         producer_session_id="session-producer",
         model_id="cursor-grok-4.5-high-fast",
         model_class="fast",
+        execution_target="isolated_copy",
     )
     with pytest.raises(ContractError, match="NEW Task"):
         validate_reviewer_launch(same, producer_session_id="session-producer")
