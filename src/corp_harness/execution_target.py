@@ -106,15 +106,18 @@ def site_path_hits_reserved(path: str | Path) -> bool:
     try:
         names.append(candidate.resolve().name.casefold())
     except OSError:
-        # Resolution can fail for inaccessible/broken paths; keep fallback
-        # behavior by relying on the raw candidate name collected above.
-        pass
+        _LOGGER.debug(
+            "Failed to resolve site_path candidate for reserved-name check: %s",
+            candidate,
+        )
     if candidate.is_symlink():
         try:
             names.append(candidate.resolve(strict=False).name.casefold())
         except OSError:
-            # Best-effort check: if symlink resolution fails, continue with collected names.
-            _LOGGER.debug("Failed to resolve symlink candidate for reserved-name check: %s", candidate)
+            _LOGGER.debug(
+                "Failed to resolve symlink candidate for reserved-name check: %s",
+                candidate,
+            )
     return any(name in RESERVED_OPENSHELL_NAMES for name in names)
 
 
