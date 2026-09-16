@@ -20,3 +20,6 @@ This repository is the factory. Factory rules stay in AGENTS.md. Community and C
 ## Skills
 
 - [gate-evidence](.github/skills/gate-evidence/SKILL.md): record digest-bound gate evidence with `corp-harness check --run`
+- [.github/copilot-instructions.md](.github/copilot-instructions.md): repository-wide Copilot coding standards
+- [.github/instructions/](.github/instructions/): path-specific Copilot coding standards (September 2026)
+- [.github/skills/code-review/SKILL.md](.github/skills/code-review/SKILL.md): Copilot code review skill

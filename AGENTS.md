@@ -82,3 +82,9 @@ flag true ⇒ `halt_report`. Attest evidence is only `check --attest-packet`
 stdout (hand-written `attest-*.json` is non-evidence). `halt_report` is
 terminal success. Oracle evidence is only
 `scripts/harness/{verify,adversarial}.sh`.
+
+## Coding standards (September 2026)
+
+Path-specific Copilot instructions: [`.github/instructions/`](.github/instructions/).
+Repository-wide Copilot file: [`.github/copilot-instructions.md`](.github/copilot-instructions.md).
+Copilot code review skill: [`.github/skills/code-review/SKILL.md`](.github/skills/code-review/SKILL.md).

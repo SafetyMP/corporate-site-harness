@@ -21,3 +21,7 @@ Do not move factory voice out of `AGENTS.md`.
 Record gate evidence with `corp-harness check --run`.
 Lifecycle: [docs/HOW_IT_WORKS.md](../docs/HOW_IT_WORKS.md).
 Factory rules: [AGENTS.md](../AGENTS.md).
+
+## Coding standards
+
+Follow path-specific files in [`.github/instructions/`](instructions/). Copilot code review loads [`.github/skills/code-review/`](skills/code-review/).
