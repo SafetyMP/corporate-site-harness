@@ -1,6 +1,6 @@
 # Hash-pinned CI install set for .github/workflows/ci.yml
 # Resolved from PyPI with: pip-compile --generate-hashes --python-version 3.11
-# Direct pins: PyYAML==6.0.3 pytest==9.1.1 ruff==0.16.6 build==1.6.0 twine==7.0.0
+# Direct pins: PyYAML==6.0.3 pytest==9.1.1 ruff==0.16.8 build==1.6.0 twine==7.0.0
 # Includes Python <3.12 and Linux marker extras so --require-hashes works on 3.11–3.13.
 # Regenerate; do not invent hashes.
 
@@ -562,7 +562,7 @@ rich==15.0.0 \
     --hash=sha256:33bd4ef74232fb73fe9279a257718407f169c09b78a87ad3d296f548e27de0bb \
     --hash=sha256:edd07a4824c6b40189fb7ac9bc4c52536e9780fbbfbddf6f1e2502c31b068c36
     # via twine
-ruff==0.16.6 \
+ruff==0.16.8 \
     --hash=sha256:0700580ed5303723cb3c11c2f1d2a8913ce77b7ea86646dddb887f5417a9ba70 \
     --hash=sha256:0b87d9d16fcb63e8018423ca1d50b7260f15cb2da33e30db4baad4183a948c25 \
     --hash=sha256:10d21c51c3495d8eaea7b703a16592117ea6eb1d649e36335aa965ff1173eb39 \
