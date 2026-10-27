@@ -1,4 +1,6 @@
-# Corporate/Site Harness
+# Corporate/Site Harness: Evidence-Gated AI Coding in Cursor
+
+A Python command-line harness for agent-assisted software delivery in Cursor, with separate design and implementation roles, artifact digest checks and human approval gates. Explore how evidence-gated development constrains coding-agent handoffs.
 
 **Digest-bound gates for Cursor corporate/site delivery.** **Evergreen
 open-source reference** for evidence-gated Cursor agent delivery — corporate
